@@ -17,14 +17,31 @@ export const getOutputDimensions = (
 
   for (const edit of edits) {
     if (edit.action === AssetEditAction.Rotate) {
-      const angleDegrees = edit.parameters.angle;
-      const angleRadians = (angleDegrees * Math.PI) / 180;
-      const cos = Math.abs(Math.cos(angleRadians));
-      const sin = Math.abs(Math.sin(angleRadians));
-      const newWidth = Math.round(width * cos + height * sin);
-      const newHeight = Math.round(width * sin + height * cos);
-      width = newWidth;
-      height = newHeight;
+      const totalAngle = ((edit.parameters.angle % 360) + 360) % 360;
+      const quadrant = Math.floor(totalAngle / 90);
+      const freeAngle = totalAngle - quadrant * 90;
+
+      // Apply 90° component (swaps dimensions)
+      if (quadrant % 2 !== 0) {
+        [width, height] = [height, width];
+      }
+
+      // Apply free rotation component → inscribed rectangle
+      if (freeAngle > 0.01) {
+        const theta = (freeAngle * Math.PI) / 180;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const cos2T = Math.cos(2 * theta);
+
+        if (Math.abs(cos2T) > 0.001 && width * cosT > height * sinT && height * cosT > width * sinT) {
+          width = Math.round((width * cosT - height * sinT) / cos2T);
+          height = Math.round((height * cosT - width * sinT) / cos2T);
+        } else {
+          const minDim = Math.min(width, height);
+          width = Math.round(minDim / (cosT + sinT));
+          height = Math.round(minDim / (cosT + sinT));
+        }
+      }
     }
   }
 
