@@ -146,29 +146,88 @@ export class MediaRepository {
   }
 
   private async applyEdits(pipeline: sharp.Sharp, edits: AssetEditActionItem[]): Promise<sharp.Sharp> {
-    const affineEditOperations = edits.filter((edit) => edit.action !== 'crop');
-    const matrix = createAffineMatrix(affineEditOperations);
-
     const crop = edits.find((edit) => edit.action === 'crop');
-    const dimensions = await pipeline.metadata();
+    const rotateEdit = edits.find((edit) => edit.action === 'rotate');
+    const mirrorEdits = edits.filter((edit) => edit.action === 'mirror');
 
+    // 1. Apply crop
     if (crop) {
       pipeline = pipeline.extract({
-        left: crop ? Math.round(crop.parameters.x) : 0,
-        top: crop ? Math.round(crop.parameters.y) : 0,
-        width: crop ? Math.round(crop.parameters.width) : dimensions.width || 0,
-        height: crop ? Math.round(crop.parameters.height) : dimensions.height || 0,
+        left: Math.round(crop.parameters.x),
+        top: Math.round(crop.parameters.y),
+        width: Math.round(crop.parameters.width),
+        height: Math.round(crop.parameters.height),
       });
     }
 
-    const { a, b, c, d } = matrix;
-    pipeline = pipeline.affine(
-      [
-        [a, b],
-        [c, d],
-      ],
-      { background: { r: 0, g: 0, b: 0, alpha: 0 } },
-    );
+    // 2. Apply mirrors
+    for (const mirror of mirrorEdits) {
+      if (mirror.parameters.axis === 'horizontal') {
+        pipeline = pipeline.flop();
+      } else {
+        pipeline = pipeline.flip();
+      }
+    }
+
+    // 3. Apply rotation
+    if (rotateEdit) {
+      const totalAngle = rotateEdit.parameters.angle;
+      const normalizedAngle = ((totalAngle % 360) + 360) % 360;
+      const angle90 = Math.round(normalizedAngle / 90) * 90;
+      const freeAngle = normalizedAngle - angle90;
+
+      // Apply 90° component (no canvas expansion)
+      if (angle90 !== 0) {
+        pipeline = pipeline.rotate(angle90);
+      }
+
+      // Apply free rotation component
+      if (Math.abs(freeAngle) > 0.01) {
+        // Materialize to get actual dimensions before free rotation
+        const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+        const W = info.width;
+        const H = info.height;
+
+        // Rotate with black background, then crop inscribed rectangle
+        const theta = Math.abs(freeAngle) * (Math.PI / 180);
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+
+        // Bounding box after rotation
+        const bbW = Math.round(W * cosT + H * sinT);
+        const bbH = Math.round(W * sinT + H * cosT);
+
+        // Inscribed rectangle (no black corners)
+        const cos2T = Math.cos(2 * theta);
+        let iW: number;
+        let iH: number;
+        if (Math.abs(cos2T) > 0.001) {
+          iW = Math.max(1, (W * cosT - H * sinT) / cos2T);
+          iH = Math.max(1, (H * cosT - W * sinT) / cos2T);
+        } else {
+          const minDim = Math.min(W, H);
+          iW = minDim / (cosT + sinT);
+          iH = iW;
+        }
+
+        // Rotate and extract inscribed rectangle
+        pipeline = sharp(data, { raw: { width: W, height: H, channels: info.channels } })
+          .rotate(freeAngle, { background: { r: 0, g: 0, b: 0 } });
+
+        // Get actual rotated dimensions and extract centered inscribed rect
+        const rotated = await pipeline.raw().toBuffer({ resolveWithObject: true });
+        const rW = rotated.info.width;
+        const rH = rotated.info.height;
+
+        const extractW = Math.min(Math.round(iW), rW);
+        const extractH = Math.min(Math.round(iH), rH);
+        const left = Math.max(0, Math.round((rW - extractW) / 2));
+        const top = Math.max(0, Math.round((rH - extractH) / 2));
+
+        pipeline = sharp(rotated.data, { raw: { width: rW, height: rH, channels: rotated.info.channels } })
+          .extract({ left, top, width: extractW, height: extractH });
+      }
+    }
 
     return pipeline;
   }
@@ -229,9 +288,19 @@ export class MediaRepository {
       }),
     ]);
 
-    const pipeline = decodingPipeline.resize(100, 100, { fit: 'inside', withoutEnlargement: true }).raw().ensureAlpha();
+    const pipeline = decodingPipeline.resize(100, 100, { fit: 'inside' }).raw().ensureAlpha();
 
     const { data, info } = await pipeline.toBuffer({ resolveWithObject: true });
+
+    // Ensure dimensions are within thumbhash limits (100x100) after affine transforms
+    if (info.width > 100 || info.height > 100) {
+      const resized = sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } })
+        .resize(100, 100, { fit: 'inside' })
+        .raw()
+        .ensureAlpha();
+      const result = await resized.toBuffer({ resolveWithObject: true });
+      return Buffer.from(rgbaToThumbHash(result.info.width, result.info.height, result.data));
+    }
 
     return Buffer.from(rgbaToThumbHash(info.width, info.height, data));
   }
