@@ -18,9 +18,13 @@ export const getOutputDimensions = (
   for (const edit of edits) {
     if (edit.action === AssetEditAction.Rotate) {
       const angleDegrees = edit.parameters.angle;
-      if (angleDegrees === 90 || angleDegrees === 270) {
-        [width, height] = [height, width];
-      }
+      const angleRadians = (angleDegrees * Math.PI) / 180;
+      const cos = Math.abs(Math.cos(angleRadians));
+      const sin = Math.abs(Math.sin(angleRadians));
+      const newWidth = Math.round(width * cos + height * sin);
+      const newHeight = Math.round(width * sin + height * cos);
+      width = newWidth;
+      height = newHeight;
     }
   }
 
@@ -104,8 +108,10 @@ export const transformPoints = (
     if (edit.action === 'rotate') {
       const angleDegrees = edit.parameters.angle;
       const angleRadians = (angleDegrees * Math.PI) / 180;
-      const newWidth = angleDegrees === 90 || angleDegrees === 270 ? currentHeight : currentWidth;
-      const newHeight = angleDegrees === 90 || angleDegrees === 270 ? currentWidth : currentHeight;
+      const cos = Math.abs(Math.cos(angleRadians));
+      const sin = Math.abs(Math.sin(angleRadians));
+      const newWidth = Math.round(currentWidth * cos + currentHeight * sin);
+      const newHeight = Math.round(currentWidth * sin + currentHeight * cos);
 
       matrix = compose(
         translate(newWidth / 2, newHeight / 2),
@@ -189,15 +195,17 @@ export const transformFaceBoundingBox = (
 };
 
 const reorderQuadPointsForRotation = (points: Point[], rotationDegrees: number): Point[] => {
+  // Normalize to nearest 90-degree increment for point reordering
+  const normalized = Math.round(rotationDegrees / 90) % 4;
   const [p1, p2, p3, p4] = points;
-  switch (rotationDegrees) {
-    case 90: {
+  switch (normalized) {
+    case 1: {
       return [p4, p1, p2, p3];
     }
-    case 180: {
+    case 2: {
       return [p3, p4, p1, p2];
     }
-    case 270: {
+    case 3: {
       return [p2, p3, p4, p1];
     }
     default: {

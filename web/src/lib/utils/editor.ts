@@ -12,12 +12,20 @@ export const normalizeTransformEdits = (
   mirrorVertical: boolean;
 } => {
   const { a, b, c, d } = buildAffineFromEdits(edits);
-  const rotation = ((isCloseToZero(a) ? Math.asin(c) : Math.acos(a)) * 180) / Math.PI;
+
+  // Use atan2 for robust angle extraction that works with arbitrary angles
+  // The matrix encodes rotation as: a=cos, b=-sin, c=sin, d=cos (negated due to coordinate system)
+  const rotation = ((-Math.atan2(c, a)) * 180) / Math.PI;
+  const normalizedRotation = rotation < 0 ? 360 + rotation : rotation;
+
+  // Detect mirroring by checking if the determinant is negative
+  const det = a * d - b * c;
+  const isMirrored = det < 0;
 
   return {
-    rotation: rotation < 0 ? 360 + rotation : rotation,
+    rotation: normalizedRotation,
     mirrorHorizontal: false,
-    mirrorVertical: isCloseToZero(a) ? b === c : a === -d,
+    mirrorVertical: isMirrored,
   };
 };
 

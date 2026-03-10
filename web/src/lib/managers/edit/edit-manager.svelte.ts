@@ -146,7 +146,8 @@ export class EditManager {
       this.hasAppliedEdits = true;
 
       return true;
-    } catch {
+    } catch (error) {
+      console.error('Edit apply failed:', error);
       toastManager.danger(t('editor_edits_applied_error'));
       return false;
     } finally {

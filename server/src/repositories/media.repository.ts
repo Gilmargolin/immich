@@ -162,10 +162,13 @@ export class MediaRepository {
     }
 
     const { a, b, c, d } = matrix;
-    pipeline = pipeline.affine([
-      [a, b],
-      [c, d],
-    ]);
+    pipeline = pipeline.affine(
+      [
+        [a, b],
+        [c, d],
+      ],
+      { background: { r: 0, g: 0, b: 0, alpha: 0 } },
+    );
 
     return pipeline;
   }
