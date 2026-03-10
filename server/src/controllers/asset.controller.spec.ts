@@ -405,7 +405,7 @@ describe(AssetController.name, () => {
       expect(status).toBe(400);
       expect(body).toEqual(
         factory.responses.badRequest(
-          expect.arrayContaining([expect.stringContaining('parameters.angle must be one of the following values')]),
+          expect.arrayContaining([expect.stringContaining('parameters.angle must be a number between 0 (inclusive) and 360 (exclusive)')]),
         ),
       );
     });

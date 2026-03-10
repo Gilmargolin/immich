@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { ResizeBoundary, transformManager } from '$lib/managers/edit/transform-manager.svelte';
+  import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { getAssetMediaUrl } from '$lib/utils';
   import { getAltText } from '$lib/utils/thumbnail-util';
   import { toTimelineAsset } from '$lib/utils/timeline-util';
   import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
-  import { Icon } from '@immich/ui';
-  import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
 
   interface Props {
@@ -14,17 +12,48 @@
 
   let { asset }: Props = $props();
 
-  // viewBox 0 0 24 24 is assumed. Without rotation this icon is top-left.
-  const cornerIcon = 'M 12 24 L 12 12 L 24 12';
-
   let canvasContainer = $state<HTMLElement | null>(null);
 
   let imageSrc = $derived(
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
   );
 
+  /**
+   * Calculate the scale factor needed so the rotated image fully covers the crop frame.
+   * Given image W×H rotated by θ, the crop frame (W×H) must be fully inscribed.
+   * Scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
+   */
+  let imageScale = $derived.by(() => {
+    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
+    if (theta === 0) return 1;
+
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    const img = transformManager.imgElement;
+    if (!img || img.width === 0 || img.height === 0) return 1;
+
+    const W = img.width;
+    const H = img.height;
+
+    // Two constraints from the 4 corners of the crop frame fitting inside the rotated image
+    const s1 = cosT + (H / W) * sinT;
+    const s2 = (W / H) * sinT + cosT;
+
+    return Math.max(s1, s2);
+  });
+
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
+
+    // Scale up so rotated image fully covers the crop frame
+    if (imageScale !== 1) {
+      transforms.push(`scale(${imageScale})`);
+    }
+
+    // Free rotation applied to the image only (frame stays static)
+    if (transformManager.freeRotation !== 0) {
+      transforms.push(`rotate(${transformManager.freeRotation}deg)`);
+    }
 
     if (transformManager.mirrorHorizontal) {
       transforms.push('scaleX(-1)');
@@ -36,168 +65,398 @@
     return transforms.join(' ');
   });
 
-  const edges = [ResizeBoundary.Top, ResizeBoundary.Right, ResizeBoundary.Bottom, ResizeBoundary.Left];
-  const corners = [
-    ResizeBoundary.TopLeft,
-    ResizeBoundary.TopRight,
-    ResizeBoundary.BottomRight,
-    ResizeBoundary.BottomLeft,
-  ];
-  function rotateBoundary(arr: ResizeBoundary[], input: ResizeBoundary, times: number) {
-    return arr[(arr.indexOf(input) + times) % 4];
-  }
+  $effect(() => {
+    if (!canvasContainer) {
+      return;
+    }
 
-  onMount(() => {
     const resizeObserver = new ResizeObserver(() => {
       transformManager.resizeCanvas();
     });
 
-    resizeObserver.observe(canvasContainer!);
+    resizeObserver.observe(canvasContainer);
 
     return () => {
       resizeObserver.disconnect();
     };
   });
+
+  // Use matching transform function list so CSS transitions interpolate.
+  // During interaction, use frozen anchor region for translate to prevent coordinate drift.
+  // Disable transition during interaction so zoom adjustments are instant.
+  let cropAreaStyle = $derived.by(() => {
+    const zoom = transformManager.cropZoom;
+    const rotation = transformManager.imageRotation;
+    const interacting = transformManager.isInteracting;
+    const transition = interacting ? 'transition: none;' : 'transition: transform 0.3s ease;';
+
+    if (zoom <= 1) {
+      return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
+    }
+
+    const el = transformManager.cropAreaEl;
+    if (!el) return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
+
+    const W = el.clientWidth;
+    const H = el.clientHeight;
+
+    // Use anchor region during drag so translate stays stable
+    const r = transformManager.zoomAnchorRegion ?? transformManager.region;
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+
+    const dx = cx - W / 2;
+    const dy = cy - H / 2;
+
+    const theta = (rotation * Math.PI) / 180;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+
+    const tx = -(zoom * dx * cosT - zoom * dy * sinT);
+    const ty = -(zoom * dx * sinT + zoom * dy * cosT);
+
+    return `${transition} transform: translate(${tx}px, ${ty}px) rotate(${rotation}deg) scale(${zoom})`;
+  });
+
+  // Show grid when free rotating or interacting
+  let showGrid = $derived(transformManager.freeRotation !== 0 || transformManager.isInteracting);
+
+  // Counter-scale so crop frame border/corners stay visually consistent when zoomed
+  let frameScale = $derived(transformManager.cropZoom > 1 ? 1 / transformManager.cropZoom : 1);
+
+  // --- Rotation dial ---
+  const DIAL_MIN = -45;
+  const DIAL_MAX = 45;
+  const PX_PER_DEGREE = 6;
+
+  let isDraggingDial = $state(false);
+  let dragStartX = $state(0);
+  let dragStartAngle = $state(0);
+
+  const ZERO_TICK_CENTER = (0 - DIAL_MIN) * PX_PER_DEGREE + PX_PER_DEGREE / 2;
+  let dialOffset = $derived(-ZERO_TICK_CENTER - transformManager.freeRotation * PX_PER_DEGREE);
+  let freeRotationDisplay = $derived(Math.round(transformManager.freeRotation));
+
+  function handleDialPointerDown(e: PointerEvent) {
+    isDraggingDial = true;
+    dragStartX = e.clientX;
+    dragStartAngle = transformManager.freeRotation;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function handleDialPointerMove(e: PointerEvent) {
+    if (!isDraggingDial) return;
+    const dx = e.clientX - dragStartX;
+    const angleDelta = -dx / PX_PER_DEGREE;
+    const newAngle = Math.max(DIAL_MIN, Math.min(DIAL_MAX, Math.round(dragStartAngle + angleDelta)));
+    transformManager.setFreeRotation(newAngle);
+  }
+
+  function handleDialPointerUp() {
+    isDraggingDial = false;
+  }
+
+  const ticks: { degree: number; isMajor: boolean }[] = [];
+  for (let d = DIAL_MIN; d <= DIAL_MAX; d++) {
+    ticks.push({ degree: d, isMajor: d % 10 === 0 });
+  }
 </script>
 
-<div class="flex flex-col items-center justify-center w-full h-full p-8" bind:this={canvasContainer}>
-  <div
-    class="crop-area max-w-full max-h-full transition-transform motion-reduce:transition-none"
-    class:rotated={transformManager.normalizedRotation % 180 > 0}
-    style:rotate={transformManager.imageRotation + 'deg'}
-    bind:this={transformManager.cropAreaEl}
-    aria-label="Crop area"
-  >
-    <img
-      draggable="false"
-      src={imageSrc}
-      alt={$getAltText(toTimelineAsset(asset))}
-      class="h-full select-none transition-transform motion-reduce:transition-none"
-      style:transform={imageTransform}
-    />
-    <div
-      class={[
-        'overlay w-full h-full absolute top-0 transition-colors motion-reduce:transition-none pointer-events-none',
-        transformManager.isInteracting ? 'bg-black/30' : 'bg-black/56',
-      ]}
-      bind:this={transformManager.overlayEl}
-    ></div>
-    <div class="crop-frame absolute border-2 border-white" bind:this={transformManager.cropFrame}>
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="canvas-container" bind:this={canvasContainer}>
+  <div class="crop-viewport">
+    <button
+      class={`crop-area ${transformManager.orientationChanged ? 'changedOriention' : ''}`}
+      style={cropAreaStyle}
+      bind:this={transformManager.cropAreaEl}
+      onmousedown={(e) => transformManager.handleMouseDown(e)}
+      onmouseup={() => transformManager.handleMouseUp()}
+      aria-label="Crop area"
+      type="button"
+    >
+      <img
+        draggable="false"
+        src={imageSrc}
+        alt={$getAltText(toTimelineAsset(asset))}
+        style={imageTransform ? `transform: ${imageTransform}` : ''}
+      />
       <div
-        class={[
-          'grid w-full h-full cursor-move transition-opacity motion-reduce:transition-none',
-          transformManager.isInteracting ? 'opacity-100' : 'opacity-0',
-        ]}
-        onmousedown={(e) => transformManager.handleMouseDownOn(e, ResizeBoundary.None)}
+        class={`${showGrid ? 'resizing' : ''} crop-frame`}
+        bind:this={transformManager.cropFrame}
+        style:--s={frameScale}
+      >
+        <div class="grid"></div>
+        <div class="corner top-left"></div>
+        <div class="corner top-right"></div>
+        <div class="corner bottom-left"></div>
+        <div class="corner bottom-right"></div>
+      </div>
+      <div
+        class={`${transformManager.isInteracting ? 'light' : ''} overlay`}
+        bind:this={transformManager.overlayEl}
       ></div>
+    </button>
+  </div>
 
-      {#each edges as edge (edge)}
-        {@const rotatedEdge = rotateBoundary(edges, edge, transformManager.normalizedRotation / 90)}
-        <button
-          class={['absolute', edge]}
-          style={`${edge}: -10px`}
-          onmousedown={(e) => transformManager.handleMouseDownOn(e, edge)}
-          type="button"
-          aria-label={$t('editor_handle_edge', { values: { edge: rotatedEdge } })}
-        ></button>
-      {/each}
-
-      {#each corners as corner (corner)}
-        {@const rotatedCorner = rotateBoundary(corners, corner, transformManager.normalizedRotation / 90)}
-        <button
-          class={['corner', corner]}
-          onmousedown={(e) => transformManager.handleMouseDownOn(e, corner)}
-          type="button"
-          aria-label={$t('editor_handle_corner', { values: { corner: rotatedCorner.replace('-', '_') } })}
-        >
-          <Icon icon={cornerIcon} size="30" strokeWidth={4} strokeColor="white" color="transparent" />
-        </button>
-      {/each}
+  <!-- Rotation dial below the image -->
+  <div class="rotation-dial-wrapper">
+    <span class="rotation-value {freeRotationDisplay !== 0 ? 'active' : ''}">{freeRotationDisplay}°</span>
+    <div class="dial-container">
+      <div class="dial-indicator"></div>
+      <div
+        class="dial-track"
+        onpointerdown={handleDialPointerDown}
+        onpointermove={handleDialPointerMove}
+        onpointerup={handleDialPointerUp}
+        onpointercancel={handleDialPointerUp}
+        role="slider"
+        aria-label={$t('editor_free_rotation')}
+        aria-valuemin={DIAL_MIN}
+        aria-valuemax={DIAL_MAX}
+        aria-valuenow={freeRotationDisplay}
+        tabindex="0"
+      >
+        <div class="dial-ruler" style="transform: translateX({dialOffset}px)">
+          {#each ticks as tick (tick.degree)}
+            <div class="tick {tick.isMajor ? 'major' : ''} {tick.degree === 0 ? 'zero' : ''}">
+              <div class="tick-line"></div>
+              {#if tick.isMajor}
+                <span class="tick-label">{tick.degree}</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
 <style>
+  .canvas-container {
+    width: calc(100% - 4rem);
+    margin: auto;
+    margin-top: 2rem;
+    height: calc(100% - 4rem);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+
+  .crop-viewport {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  .crop-area {
+    position: relative;
+    display: inline-block;
+    outline: none;
+    max-height: 100%;
+    max-width: 100%;
+    width: max-content;
+    /* No overflow:hidden — the rotated/scaled image should be visible beyond the frame */
+  }
+  .crop-area.changedOriention {
+    max-width: 92vh;
+    max-height: calc(100vw - 400px - 1.5rem);
+  }
+
   .crop-frame.transition {
     transition: all 0.15s ease;
   }
+  .overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.56);
+    pointer-events: none;
+    transition: background 0.1s;
+  }
+
+  .overlay.light {
+    background: rgba(0, 0, 0, 0.3);
+  }
 
   .grid {
-    --color: white;
-    --shadow: #00000057;
-    background-image:
-      linear-gradient(var(--color) 1px, transparent 0), linear-gradient(90deg, var(--color) 1px, transparent 0),
-      linear-gradient(var(--shadow) 3px, transparent 0), linear-gradient(90deg, var(--shadow) 3px, transparent 0);
-    background-size: calc(100% / 3) calc(100% / 3);
-  }
-
-  .left,
-  .right {
+    position: absolute;
     top: 0;
-    width: 20px;
-    height: 100%;
-    cursor: ew-resize;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.3) 0.5px, transparent 0),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.3) 0.5px, transparent 0);
+    background-size: calc(100% / 6) calc(100% / 6);
+    opacity: 0;
+    transition: opacity 0.1s ease;
   }
 
-  .top,
-  .bottom {
-    width: 100%;
-    height: 20px;
-    cursor: ns-resize;
+  .crop-frame.resizing .grid {
+    opacity: 1;
+  }
+
+  .crop-area img {
+    display: block;
+    max-width: 100%;
+    height: 100%;
+    user-select: none;
+    transition: transform 0.15s ease;
+    transform-origin: center center;
+  }
+
+  .crop-frame {
+    position: absolute;
+    border: max(1px, calc(2px * var(--s, 1))) solid white;
+    box-sizing: border-box;
+    pointer-events: none;
+    z-index: 1;
   }
 
   .corner {
     position: absolute;
-    --offset: -15px;
+    width: max(10px, calc(20px * var(--s, 1)));
+    height: max(10px, calc(20px * var(--s, 1)));
+    --size: max(2px, calc(5.2px * var(--s, 1)));
+    --mSize: calc(-0.5 * var(--size));
+    border: var(--size) solid white;
+    box-sizing: border-box;
   }
 
   .top-left {
-    top: var(--offset);
-    left: var(--offset);
-    cursor: nwse-resize;
+    top: var(--mSize);
+    left: var(--mSize);
+    border-right: none;
+    border-bottom: none;
   }
 
   .top-right {
-    top: var(--offset);
-    right: var(--offset);
-    cursor: nesw-resize;
-    rotate: 90deg;
-  }
-
-  .bottom-right {
-    bottom: var(--offset);
-    right: var(--offset);
-    cursor: nwse-resize;
-    rotate: 180deg;
+    top: var(--mSize);
+    right: var(--mSize);
+    border-left: none;
+    border-bottom: none;
   }
 
   .bottom-left {
-    bottom: var(--offset);
-    left: var(--offset);
-    cursor: nesw-resize;
-    rotate: 270deg;
+    bottom: var(--mSize);
+    left: var(--mSize);
+    border-right: none;
+    border-top: none;
   }
 
-  .crop-area.rotated {
-    max-width: calc(100vh - 16 * var(--spacing));
-    max-height: calc(100vw - 400px - 16 * var(--spacing));
+  .bottom-right {
+    bottom: var(--mSize);
+    right: var(--mSize);
+    border-left: none;
+    border-top: none;
+  }
 
-    .left,
-    .right {
-      cursor: ns-resize;
-    }
-    .top,
-    .bottom {
-      cursor: ew-resize;
-    }
-    .top-left,
-    .bottom-right {
-      cursor: nesw-resize;
-    }
-    .top-right,
-    .bottom-left {
-      cursor: nwse-resize;
-    }
+  /* Rotation dial */
+  .rotation-dial-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin-top: 16px;
+    width: 100%;
+    max-width: 320px;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .rotation-value {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.15s;
+  }
+
+  .rotation-value.active {
+    color: white;
+  }
+
+  .dial-container {
+    position: relative;
+    width: 100%;
+    height: 40px;
+    overflow: hidden;
+  }
+
+  .dial-indicator {
+    position: absolute;
+    left: 50%;
+    top: 4px;
+    width: 2px;
+    height: 18px;
+    background: white;
+    transform: translateX(-50%);
+    z-index: 2;
+    border-radius: 1px;
+  }
+
+  .dial-track {
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    display: flex;
+    align-items: flex-start;
+    padding-top: 4px;
+  }
+
+  .dial-track:active {
+    cursor: grabbing;
+  }
+
+  .dial-ruler {
+    display: flex;
+    align-items: flex-start;
+    margin-left: 50%;
+  }
+
+  .tick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 6px;
+    flex-shrink: 0;
+  }
+
+  .tick-line {
+    width: 1px;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.25);
+    border-radius: 0.5px;
+  }
+
+  .tick.major .tick-line {
+    height: 14px;
+    background: rgba(255, 255, 255, 0.5);
+  }
+
+  .tick.zero .tick-line {
+    height: 16px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.7);
+  }
+
+  .tick-label {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 2px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tick.zero .tick-label {
+    color: rgba(255, 255, 255, 0.7);
   }
 </style>

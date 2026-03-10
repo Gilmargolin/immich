@@ -88,10 +88,10 @@ export function IsAxisAlignedRotation() {
       name: 'isAxisAlignedRotation',
       validator: {
         validate(value: any) {
-          return [0, 90, 180, 270].includes(value);
+          return typeof value === 'number' && value >= 0 && value < 360;
         },
         defaultMessage: buildMessage(
-          (eachPrefix) => eachPrefix + '$property must be one of the following values: 0, 90, 180, 270',
+          (eachPrefix) => eachPrefix + '$property must be a number between 0 (inclusive) and 360 (exclusive)',
           {},
         ),
       },

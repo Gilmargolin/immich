@@ -38,7 +38,7 @@ export class CropParameters {
 
 export class RotateParameters {
   @IsAxisAlignedRotation()
-  @ApiProperty({ description: 'Rotation angle in degrees' })
+  @ApiProperty({ description: 'Rotation angle in degrees (0-360, supports fractional values for free rotation)' })
   angle!: number;
 }
 

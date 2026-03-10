@@ -73,13 +73,27 @@ class TransformManager implements EditToolManager {
     height: this.cropImageSize.height * this.cropImageScale,
   });
 
+  // CSS zoom applied after crop resize so the crop fills the editing area
+  cropZoom = $state(1);
+  // Frozen region used for zoom centering during drag — prevents coordinate drift
+  zoomAnchorRegion: Region | null = $state(null);
+
   imageRotation = $state(0);
+  freeRotation = $state(0);
+  isRotating = $state(false);
+  rotateStartAngle = $state(0);
+  rotateStartMouseAngle = $state(0);
   mirrorHorizontal = $state(false);
   mirrorVertical = $state(false);
   normalizedRotation = $derived.by(() => {
     const newAngle = this.imageRotation % 360;
     return newAngle < 0 ? newAngle + 360 : newAngle;
   });
+  totalRotation = $derived.by(() => {
+    const total = (this.normalizedRotation + this.freeRotation) % 360;
+    return total < 0 ? total + 360 : total;
+  });
+  orientationChanged = $derived.by(() => this.normalizedRotation % 180 > 0);
 
   edits = $derived.by(() => this.getEdits());
 
@@ -91,10 +105,12 @@ class TransformManager implements EditToolManager {
       return;
     }
 
+    this.cropZoom = 1;
     const newCrop = this.recalculateCrop(aspectRatio);
     if (newCrop) {
       this.animateCropChange(newCrop);
       this.region = newCrop;
+      setTimeout(() => this.zoomToFillCrop(), 150);
     }
   }
 
@@ -104,7 +120,8 @@ class TransformManager implements EditToolManager {
       Math.abs(this.previewImageSize.height - this.region.height) > 2 ||
       this.mirrorHorizontal ||
       this.mirrorVertical ||
-      this.normalizedRotation !== 0
+      this.normalizedRotation !== 0 ||
+      this.freeRotation !== 0
     );
   }
 
@@ -163,11 +180,11 @@ class TransformManager implements EditToolManager {
       });
     }
 
-    if (this.normalizedRotation !== 0) {
+    if (this.totalRotation !== 0) {
       edits.push({
         action: AssetEditAction.Rotate,
         parameters: {
-          angle: this.normalizedRotation,
+          angle: this.totalRotation,
         },
       });
     }
@@ -177,8 +194,11 @@ class TransformManager implements EditToolManager {
 
   async resetAllChanges() {
     this.imageRotation = 0;
+    this.freeRotation = 0;
+    this.cropZoom = 1;
     this.mirrorHorizontal = false;
     this.mirrorVertical = false;
+
     await tick();
 
     this.onImageLoad([]);
@@ -210,7 +230,11 @@ class TransformManager implements EditToolManager {
     // Normalize rotation and mirror edits to single rotation and mirror state
     // This allows edits to be imported in any order and still produce correct state
     const normalizedTransformation = normalizeTransformEdits(transformEdits);
-    this.imageRotation = normalizedTransformation.rotation;
+    // Split into axis-aligned (90° increments) and free rotation parts
+    const totalRotation = normalizedTransformation.rotation;
+    const axisAligned = Math.round(totalRotation / 90) * 90;
+    this.imageRotation = axisAligned % 360;
+    this.freeRotation = totalRotation - axisAligned;
     this.mirrorHorizontal = normalizedTransformation.mirrorHorizontal;
     this.mirrorVertical = normalizedTransformation.mirrorVertical;
 
@@ -233,8 +257,12 @@ class TransformManager implements EditToolManager {
     this.imgElement = null;
     this.cropAreaEl = null;
     this.isDragging = false;
+    this.isRotating = false;
     this.overlayEl = null;
     this.imageRotation = 0;
+    this.freeRotation = 0;
+    this.cropZoom = 1;
+    this.zoomAnchorRegion = null;
     this.mirrorHorizontal = false;
     this.mirrorVertical = false;
     this.region = { x: 0, y: 0, width: 100, height: 100 };
@@ -242,6 +270,7 @@ class TransformManager implements EditToolManager {
     this.originalImageSize = { width: 1000, height: 1000 };
     this.cropImageScale = 1;
     this.cropAspectRatio = 'free';
+
     this.hasChanges = false;
   }
 
@@ -267,6 +296,11 @@ class TransformManager implements EditToolManager {
     this.onImageLoad();
   }
 
+  setFreeRotation(angle: number) {
+    this.hasChanges = true;
+    this.freeRotation = angle;
+  }
+
   recalculateCrop(aspectRatio: string = this.cropAspectRatio): Region {
     if (!this.cropAreaEl) {
       return this.region;
@@ -275,25 +309,32 @@ class TransformManager implements EditToolManager {
     const canvasW = this.cropAreaEl.clientWidth;
     const canvasH = this.cropAreaEl.clientHeight;
 
-    // Calculate new dimensions with aspect ratio
-    const { newWidth: w, newHeight: h } = this.keepAspectRatio(this.region.width, this.region.height, aspectRatio);
+    const [widthRatio, heightRatio] = aspectRatio.split(':').map(Number);
 
-    // Scale down if needed to fit in canvas
-    let newWidth = w;
-    let newHeight = h;
-
-    if (w > canvasW) {
-      newWidth = canvasW;
-      newHeight = canvasW / (w / h);
-    } else if (h > canvasH) {
-      newHeight = canvasH;
-      newWidth = canvasH * (w / h);
+    if (!widthRatio || !heightRatio) {
+      // Free crop — return full canvas
+      return { x: 0, y: 0, width: canvasW, height: canvasH };
     }
 
-    // Constrain position to keep crop area within canvas
+    const ratio = widthRatio / heightRatio;
+    let newWidth: number;
+    let newHeight: number;
+
+    // Inscribe within full canvas so crop fills the editing area
+    if (canvasW / canvasH > ratio) {
+      // Canvas is wider than ratio — height fills, width shrinks
+      newHeight = canvasH;
+      newWidth = newHeight * ratio;
+    } else {
+      // Canvas is taller than ratio — width fills, height shrinks
+      newWidth = canvasW;
+      newHeight = newWidth / ratio;
+    }
+
+    // Center in canvas
     return {
-      x: Math.max(0, Math.min(this.region.x, canvasW - newWidth)),
-      y: Math.max(0, Math.min(this.region.y, canvasH - newHeight)),
+      x: (canvasW - newWidth) / 2,
+      y: (canvasH - newHeight) / 2,
       width: newWidth,
       height: newHeight,
     };
@@ -432,6 +473,7 @@ class TransformManager implements EditToolManager {
       return;
     }
 
+    this.cropZoom = 1;
     this.cropImageSize = { width: img.width, height: img.height };
     const scale = this.calculateScale();
 
@@ -549,17 +591,43 @@ class TransformManager implements EditToolManager {
     this.draw();
   }
 
-  handleMouseDownOn(e: MouseEvent, resizeBoundary: ResizeBoundary) {
+  handleMouseDown(e: MouseEvent) {
     if (e.button !== 0) {
       return;
     }
 
-    this.isInteracting = true;
-    this.resizeSide = resizeBoundary;
-    if (resizeBoundary === ResizeBoundary.None) {
-      this.isDragging = true;
-      const { mouseX, mouseY } = this.getMousePosition(e);
-      this.dragAnchor = { x: mouseX - this.region.x, y: mouseY - this.region.y };
+    // Freeze the current region for zoom centering so the transform
+    // stays stable during the drag (prevents coordinate drift)
+    if (this.cropZoom !== 1) {
+      this.zoomAnchorRegion = { ...this.region };
+    }
+
+    const { mouseX, mouseY } = this.getMousePosition(e);
+
+    const {
+      onLeftBoundary,
+      onRightBoundary,
+      onTopBoundary,
+      onBottomBoundary,
+      onTopLeftCorner,
+      onTopRightCorner,
+      onBottomLeftCorner,
+      onBottomRightCorner,
+    } = this.isOnCropBoundary(mouseX, mouseY);
+
+    if (
+      onTopLeftCorner ||
+      onTopRightCorner ||
+      onBottomLeftCorner ||
+      onBottomRightCorner ||
+      onLeftBoundary ||
+      onRightBoundary ||
+      onTopBoundary ||
+      onBottomBoundary
+    ) {
+      this.setResizeSide(mouseX, mouseY);
+    } else if (this.isInCropArea(mouseX, mouseY)) {
+      this.startDragging(mouseX, mouseY);
     }
 
     document.body.style.userSelect = 'none';
@@ -584,44 +652,95 @@ class TransformManager implements EditToolManager {
     globalThis.removeEventListener('mouseup', this.handleMouseUp);
     document.body.style.userSelect = '';
 
+    const wasResizing = this.resizeSide !== ResizeBoundary.None;
+    const wasDragging = this.isDragging;
+
     this.isInteracting = false;
     this.isDragging = false;
     this.resizeSide = ResizeBoundary.None;
+    this.zoomAnchorRegion = null;
+    this.fadeOverlay(true);
+
+    // After crop resize or drag, zoom to fill the editing area
+    if (wasResizing || wasDragging) {
+      setTimeout(() => this.zoomToFillCrop(), 200);
+    }
+  }
+
+  zoomToFillCrop() {
+    const cropArea = this.cropAreaEl;
+    if (!cropArea) return;
+
+    // Parent is the crop-viewport which excludes the dial
+    const viewport = cropArea.parentElement;
+    if (!viewport) return;
+
+    const containerW = viewport.clientWidth;
+    const containerH = viewport.clientHeight;
+    const { width: cropW, height: cropH } = this.region;
+
+    if (cropW <= 0 || cropH <= 0) return;
+
+    // Leave padding so dimmed image is visible around the crop (like Google Photos)
+    const padding = 40;
+    const zoom = Math.min((containerW - padding * 2) / cropW, (containerH - padding * 2) / cropH);
+    if (zoom <= 1.05) {
+      this.cropZoom = 1;
+      return;
+    }
+
+    this.cropZoom = Math.min(zoom, 5);
+    this.draw();
+  }
+
+  // During drag, reduce zoom if the crop has grown beyond what fits with padding
+  adjustZoomDuringInteraction() {
+    if (this.cropZoom <= 1) return;
+
+    const viewport = this.cropAreaEl?.parentElement;
+    if (!viewport) return;
+
+    const containerW = viewport.clientWidth;
+    const containerH = viewport.clientHeight;
+    const { width: cropW, height: cropH } = this.region;
+
+    const padding = 40;
+    const neededZoom = Math.min((containerW - padding * 2) / cropW, (containerH - padding * 2) / cropH);
+
+    // Only reduce zoom (never increase during drag)
+    if (neededZoom < this.cropZoom) {
+      this.cropZoom = Math.max(1, neededZoom);
+      // Update anchor to current region so centering follows the crop
+      this.zoomAnchorRegion = { ...this.region };
+    }
   }
 
   getMousePosition(e: MouseEvent) {
-    if (!this.cropAreaEl) {
-      throw new Error('Crop area is undefined');
+    let offsetX = e.clientX;
+    let offsetY = e.clientY;
+    const clienRect = this.cropAreaEl?.getBoundingClientRect();
+    const rotateDeg = this.normalizedRotation;
+    if (rotateDeg == 90) {
+      offsetX = e.clientY - (clienRect?.top ?? 0);
+      offsetY = window.innerWidth - e.clientX - (window.innerWidth - (clienRect?.right ?? 0));
+    } else if (rotateDeg == 180) {
+      offsetX = window.innerWidth - e.clientX - (window.innerWidth - (clienRect?.right ?? 0));
+      offsetY = window.innerHeight - e.clientY - (window.innerHeight - (clienRect?.bottom ?? 0));
+    } else if (rotateDeg == 270) {
+      offsetX = window.innerHeight - e.clientY - (window.innerHeight - (clienRect?.bottom ?? 0));
+      offsetY = e.clientX - (clienRect?.left ?? 0);
+    } else if (rotateDeg == 0) {
+      offsetX -= clienRect?.left ?? 0;
+      offsetY -= clienRect?.top ?? 0;
     }
-    const clientRect = this.cropAreaEl.getBoundingClientRect();
 
-    switch (this.normalizedRotation) {
-      case 90: {
-        return {
-          mouseX: e.clientY - clientRect.top,
-          mouseY: -e.clientX + clientRect.right,
-        };
-      }
-      case 180: {
-        return {
-          mouseX: -e.clientX + clientRect.right,
-          mouseY: -e.clientY + clientRect.bottom,
-        };
-      }
-      case 270: {
-        return {
-          mouseX: -e.clientY + clientRect.bottom,
-          mouseY: e.clientX - clientRect.left,
-        };
-      }
-      // also case 0:
-      default: {
-        return {
-          mouseX: e.clientX - clientRect.left,
-          mouseY: e.clientY - clientRect.top,
-        };
-      }
+    // Convert from visual (CSS-scaled) coordinates to layout coordinates
+    if (this.cropZoom !== 1) {
+      offsetX /= this.cropZoom;
+      offsetY /= this.cropZoom;
     }
+
+    return { mouseX: offsetX, mouseY: offsetY };
   }
 
   moveCrop(mouseX: number, mouseY: number) {
@@ -635,6 +754,7 @@ class TransformManager implements EditToolManager {
     this.region.y = clamp(mouseY - this.dragAnchor.y, 0, cropArea.clientHeight - this.region.height);
 
     this.draw();
+    this.adjustZoomDuringInteraction();
   }
 
   resizeCrop(mouseX: number, mouseY: number) {
@@ -817,10 +937,12 @@ class TransformManager implements EditToolManager {
     };
 
     this.draw();
+    this.adjustZoomDuringInteraction();
   }
 
   resetCrop() {
     this.cropAspectRatio = 'free';
+    this.cropZoom = 1;
     this.region = {
       x: 0,
       y: 0,
@@ -886,6 +1008,122 @@ class TransformManager implements EditToolManager {
       width: Math.min(width, bounds.width - Math.max(0, x)),
       height: Math.min(height, bounds.height - Math.max(0, y)),
     };
+  }
+
+  // Boundary detection helpers
+  private isInRange(value: number, target: number, sensitivity: number): boolean {
+    return value >= target - sensitivity && value <= target + sensitivity;
+  }
+
+  private isWithinBounds(value: number, min: number, max: number): boolean {
+    return value >= min && value <= max;
+  }
+
+  isOnCropBoundary(mouseX: number, mouseY: number) {
+    const { x, y, width, height } = this.region;
+    const sensitivity = 10;
+    const cornerSensitivity = 15;
+    const { width: imgWidth, height: imgHeight } = this.cropImageSize;
+
+    const outOfBound = mouseX > imgWidth || mouseY > imgHeight || mouseX < 0 || mouseY < 0;
+    if (outOfBound) {
+      return {
+        onLeftBoundary: false,
+        onRightBoundary: false,
+        onTopBoundary: false,
+        onBottomBoundary: false,
+        onTopLeftCorner: false,
+        onTopRightCorner: false,
+        onBottomLeftCorner: false,
+        onBottomRightCorner: false,
+      };
+    }
+
+    const onLeftBoundary = this.isInRange(mouseX, x, sensitivity) && this.isWithinBounds(mouseY, y, y + height);
+    const onRightBoundary =
+      this.isInRange(mouseX, x + width, sensitivity) && this.isWithinBounds(mouseY, y, y + height);
+    const onTopBoundary = this.isInRange(mouseY, y, sensitivity) && this.isWithinBounds(mouseX, x, x + width);
+    const onBottomBoundary =
+      this.isInRange(mouseY, y + height, sensitivity) && this.isWithinBounds(mouseX, x, x + width);
+
+    const onTopLeftCorner =
+      this.isInRange(mouseX, x, cornerSensitivity) && this.isInRange(mouseY, y, cornerSensitivity);
+    const onTopRightCorner =
+      this.isInRange(mouseX, x + width, cornerSensitivity) && this.isInRange(mouseY, y, cornerSensitivity);
+    const onBottomLeftCorner =
+      this.isInRange(mouseX, x, cornerSensitivity) && this.isInRange(mouseY, y + height, cornerSensitivity);
+    const onBottomRightCorner =
+      this.isInRange(mouseX, x + width, cornerSensitivity) && this.isInRange(mouseY, y + height, cornerSensitivity);
+
+    return {
+      onLeftBoundary,
+      onRightBoundary,
+      onTopBoundary,
+      onBottomBoundary,
+      onTopLeftCorner,
+      onTopRightCorner,
+      onBottomLeftCorner,
+      onBottomRightCorner,
+    };
+  }
+
+  isInCropArea(mouseX: number, mouseY: number) {
+    const { x, y, width, height } = this.region;
+    return mouseX >= x && mouseX <= x + width && mouseY >= y && mouseY <= y + height;
+  }
+
+  setResizeSide(mouseX: number, mouseY: number) {
+    const {
+      onLeftBoundary,
+      onRightBoundary,
+      onTopBoundary,
+      onBottomBoundary,
+      onTopLeftCorner,
+      onTopRightCorner,
+      onBottomLeftCorner,
+      onBottomRightCorner,
+    } = this.isOnCropBoundary(mouseX, mouseY);
+
+    if (onTopLeftCorner) {
+      this.resizeSide = ResizeBoundary.TopLeft;
+    } else if (onTopRightCorner) {
+      this.resizeSide = ResizeBoundary.TopRight;
+    } else if (onBottomLeftCorner) {
+      this.resizeSide = ResizeBoundary.BottomLeft;
+    } else if (onBottomRightCorner) {
+      this.resizeSide = ResizeBoundary.BottomRight;
+    } else if (onLeftBoundary) {
+      this.resizeSide = ResizeBoundary.Left;
+    } else if (onRightBoundary) {
+      this.resizeSide = ResizeBoundary.Right;
+    } else if (onTopBoundary) {
+      this.resizeSide = ResizeBoundary.Top;
+    } else if (onBottomBoundary) {
+      this.resizeSide = ResizeBoundary.Bottom;
+    }
+  }
+
+  startDragging(mouseX: number, mouseY: number) {
+    this.isDragging = true;
+    const crop = this.region;
+    this.isInteracting = true;
+    this.dragAnchor = { x: mouseX - crop.x, y: mouseY - crop.y };
+    this.fadeOverlay(false);
+  }
+
+  fadeOverlay(toDark: boolean) {
+    const overlay = this.overlayEl;
+    const cropFrame = this.cropFrame;
+
+    if (toDark) {
+      overlay?.classList.remove('light');
+      cropFrame?.classList.remove('resizing');
+    } else {
+      overlay?.classList.add('light');
+      cropFrame?.classList.add('resizing');
+    }
+
+    this.isInteracting = !toDark;
   }
 }
 
