@@ -325,6 +325,122 @@ describe(MediaRepository.name, () => {
     });
   });
 
+  describe('applyEdits (free rotation)', () => {
+    it('should produce no black corners when free-rotating a solid color image', async () => {
+      const solidRed = sharp({
+        create: { width: 1000, height: 1000, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } },
+      }).png();
+
+      const result = await sut['applyEdits'](solidRed, [
+        { action: AssetEditAction.Rotate, parameters: { angle: 15 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const metadata = await sharp(buffer).metadata();
+      const w = metadata.width!;
+      const h = metadata.height!;
+
+      // Check center and near-corner pixels are still red (not black)
+      const centerColor = await getPixelColor(buffer, Math.round(w / 2), Math.round(h / 2));
+      expect(centerColor).toEqual({ r: 255, g: 0, b: 0 });
+
+      // Near top-left corner (with margin)
+      const margin = 10;
+      const tlColor = await getPixelColor(buffer, margin, margin);
+      expect(tlColor).toEqual({ r: 255, g: 0, b: 0 });
+
+      // Near bottom-right corner
+      const brColor = await getPixelColor(buffer, w - margin - 1, h - margin - 1);
+      expect(brColor).toEqual({ r: 255, g: 0, b: 0 });
+    });
+
+    it('should produce dimensions smaller than original (inscribed rect cropping)', async () => {
+      const result = await sut['applyEdits'](
+        sharp({
+          create: { width: 1000, height: 1000, channels: 4, background: { r: 128, g: 128, b: 128, alpha: 1 } },
+        }).png(),
+        [{ action: AssetEditAction.Rotate, parameters: { angle: 10 } }],
+      );
+
+      const buffer = await result.png().toBuffer();
+      const metadata = await sharp(buffer).metadata();
+
+      // Inscribed rectangle must be smaller than original
+      expect(metadata.width!).toBeLessThan(1000);
+      expect(metadata.height!).toBeLessThan(1000);
+      // But still a reasonable size (not degenerate)
+      expect(metadata.width!).toBeGreaterThan(800);
+      expect(metadata.height!).toBeGreaterThan(800);
+    });
+
+    it('should handle mixed 90° + free rotation (e.g. 95°)', async () => {
+      const solidGreen = sharp({
+        create: { width: 500, height: 1000, channels: 4, background: { r: 0, g: 255, b: 0, alpha: 1 } },
+      }).png();
+
+      const result = await sut['applyEdits'](solidGreen, [
+        { action: AssetEditAction.Rotate, parameters: { angle: 95 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const metadata = await sharp(buffer).metadata();
+
+      // 90° component swaps dimensions, then 5° free rotation crops inscribed rect
+      // Width should be close to original height, height close to original width, both slightly smaller
+      expect(metadata.width!).toBeGreaterThan(900);
+      expect(metadata.height!).toBeLessThan(500);
+
+      // No black corners — center pixel should be green
+      const centerColor = await getPixelColor(buffer, Math.round(metadata.width! / 2), Math.round(metadata.height! / 2));
+      expect(centerColor).toEqual({ r: 0, g: 255, b: 0 });
+    });
+
+    it('should handle crop then free rotation', async () => {
+      const result = await sut['applyEdits'](
+        sharp({
+          create: { width: 1000, height: 1000, channels: 4, background: { r: 0, g: 0, b: 255, alpha: 1 } },
+        }).png(),
+        [
+          { action: AssetEditAction.Crop, parameters: { x: 100, y: 100, width: 800, height: 600 } },
+          { action: AssetEditAction.Rotate, parameters: { angle: 5 } },
+        ],
+      );
+
+      const buffer = await result.png().toBuffer();
+      const metadata = await sharp(buffer).metadata();
+
+      // After crop (800x600), free rotation inscribed rect is smaller
+      expect(metadata.width!).toBeLessThan(800);
+      expect(metadata.height!).toBeLessThan(600);
+      expect(metadata.width!).toBeGreaterThan(700);
+      expect(metadata.height!).toBeGreaterThan(500);
+
+      // No black corners
+      const centerColor = await getPixelColor(buffer, Math.round(metadata.width! / 2), Math.round(metadata.height! / 2));
+      expect(centerColor).toEqual({ r: 0, g: 0, b: 255 });
+    });
+  });
+
+  describe('generateThumbhash (dimension safety)', () => {
+    it('should stay within 100x100 after free rotation', async () => {
+      const solidImage = sharp({
+        create: { width: 500, height: 500, channels: 4, background: { r: 200, g: 100, b: 50, alpha: 1 } },
+      }).png();
+
+      const inputBuffer = await solidImage.toBuffer();
+
+      // Should not throw — thumbhash must handle the extra canvas from rotation
+      const thumbhash = await sut.generateThumbhash(inputBuffer, {
+        colorspace: 'srgb',
+        processInvalidImages: false,
+        edits: [{ action: AssetEditAction.Rotate, parameters: { angle: 15 } }],
+      });
+
+      expect(thumbhash).toBeInstanceOf(Buffer);
+      expect(thumbhash.length).toBeGreaterThan(0);
+    });
+  });
+
   describe('checkFaceVisibility', () => {
     const baseFace: AssetFace = {
       id: 'face-1',
