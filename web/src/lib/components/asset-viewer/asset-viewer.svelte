@@ -9,7 +9,7 @@
   import { activityManager } from '$lib/managers/activity-manager.svelte';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
-  import { editManager, EditToolType } from '$lib/managers/edit/edit-manager.svelte';
+  import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { eventManager } from '$lib/managers/event-manager.svelte';
   import { imageManager } from '$lib/managers/ImageManager.svelte';
   import { getAssetActions } from '$lib/services/asset.service';
@@ -42,6 +42,7 @@
   import ActivityStatus from './activity-status.svelte';
   import ActivityViewer from './activity-viewer.svelte';
   import DetailPanel from './detail-panel.svelte';
+  import AdjustArea from './editor/adjust-tool/adjust-area.svelte';
   import EditorPanel from './editor/editor-panel.svelte';
   import CropArea from './editor/transform-tool/crop-area.svelte';
   import ImagePanoramaViewer from './image-panorama-viewer.svelte';
@@ -180,6 +181,7 @@
   const closeEditor = async () => {
     if (editManager.hasAppliedEdits) {
       const refreshedAsset = await getAssetInfo({ id: asset.id });
+      cursor.current = refreshedAsset;
       onAssetChange?.(refreshedAsset);
       assetViewingStore.setAsset(refreshedAsset);
     }
@@ -376,8 +378,11 @@
     ) {
       return 'ImagePanaramaViewer';
     }
-    if (assetViewerManager.isShowEditor && editManager.selectedTool?.type === EditToolType.Transform) {
+    if (assetViewerManager.isShowEditor && editManager.isCropMode) {
       return 'CropArea';
+    }
+    if (assetViewerManager.isShowEditor) {
+      return 'AdjustArea';
     }
     return 'PhotoViewer';
   });
@@ -493,6 +498,8 @@
       <ImagePanoramaViewer {asset} />
     {:else if viewerKind === 'CropArea'}
       <CropArea {asset} />
+    {:else if viewerKind === 'AdjustArea'}
+      <AdjustArea {asset} />
     {:else if viewerKind === 'PhotoViewer'}
       <PhotoViewer
         {cursor}
