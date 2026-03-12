@@ -176,8 +176,8 @@ export class MediaRepository {
       const angle90 = Math.round(normalizedAngle / 90) * 90;
       const freeAngle = normalizedAngle - angle90;
 
-      // Apply 90° component (no canvas expansion)
-      if (angle90 !== 0) {
+      // Apply 90° component (no canvas expansion, skip full 360° rotation)
+      if (angle90 % 360 !== 0) {
         pipeline = pipeline.rotate(angle90);
       }
 
@@ -192,10 +192,6 @@ export class MediaRepository {
         const theta = Math.abs(freeAngle) * (Math.PI / 180);
         const cosT = Math.cos(theta);
         const sinT = Math.sin(theta);
-
-        // Bounding box after rotation
-        const bbW = Math.round(W * cosT + H * sinT);
-        const bbH = Math.round(W * sinT + H * cosT);
 
         // Inscribed rectangle (no black corners)
         const cos2T = Math.cos(2 * theta);
