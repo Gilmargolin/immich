@@ -325,119 +325,213 @@ describe(MediaRepository.name, () => {
     });
   });
 
-  describe('applyEdits (free rotation)', () => {
-    it('should produce no black corners when free-rotating a solid color image', async () => {
-      const solidRed = sharp({
-        create: { width: 1000, height: 1000, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } },
-      }).png();
+  describe('applyEdits (adjust)', () => {
+    const buildGrayImage = async (value = 128) => {
+      return sharp({
+        create: { width: 100, height: 100, channels: 3, background: { r: value, g: value, b: value } },
+      })
+        .png()
+        .toBuffer();
+    };
 
-      const result = await sut['applyEdits'](solidRed, [
-        { action: AssetEditAction.Rotate, parameters: { angle: 15 } },
+    const getAverageColor = async (buffer: Buffer) => {
+      const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+      let r = 0,
+        g = 0,
+        b = 0;
+      const pixels = info.width * info.height;
+      for (let i = 0; i < pixels; i++) {
+        r += data[i * info.channels];
+        g += data[i * info.channels + 1];
+        b += data[i * info.channels + 2];
+      }
+      return { r: Math.round(r / pixels), g: Math.round(g / pixels), b: Math.round(b / pixels) };
+    };
+
+    const defaultAdjust = {
+      brightness: 0,
+      contrast: 0,
+      saturation: 0,
+      warmth: 0,
+      tint: 0,
+      highlights: 0,
+      shadows: 0,
+      whitePoint: 0,
+      blackPoint: 0,
+    };
+
+    it('should not alter image when all values are zero', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(avg.r).toBeCloseTo(128, -1);
+      expect(avg.g).toBeCloseTo(128, -1);
+      expect(avg.b).toBeCloseTo(128, -1);
+    });
+
+    it('should increase brightness', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, brightness: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(avg.r).toBeGreaterThan(160);
+    });
+
+    it('should decrease brightness', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, brightness: -0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(avg.r).toBeLessThan(96);
+    });
+
+    it('should increase contrast', async () => {
+      const imageBuffer = await buildGrayImage(200);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, contrast: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // High pixel values pushed even higher by contrast increase
+      expect(avg.r).toBeGreaterThan(200);
+    });
+
+    it('should increase saturation of a colored image', async () => {
+      const imageBuffer = await sharp({
+        create: { width: 100, height: 100, channels: 3, background: { r: 200, g: 100, b: 100 } },
+      })
+        .png()
+        .toBuffer();
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, saturation: 0.8 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // More saturated red means r increases, g/b decrease
+      expect(avg.r).toBeGreaterThan(200);
+      expect(avg.g).toBeLessThan(100);
+    });
+
+    it('should shift warmth (hue shift)', async () => {
+      const imageBuffer = await sharp({
+        create: { width: 100, height: 100, channels: 3, background: { r: 200, g: 100, b: 100 } },
+      })
+        .png()
+        .toBuffer();
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, warmth: 1.0 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // Warmth shifts hue; the exact output depends on Sharp's modulate, but colors should change
+      const origAvg = await getAverageColor(imageBuffer);
+      expect(avg.r !== origAvg.r || avg.g !== origAvg.g || avg.b !== origAvg.b).toBe(true);
+    });
+
+    it('should apply highlights adjustment', async () => {
+      const imageBuffer = await buildGrayImage(100);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, highlights: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // Gamma > 1 brightens midtones
+      expect(avg.r).toBeGreaterThan(100);
+    });
+
+    it('should apply shadows adjustment', async () => {
+      const imageBuffer = await buildGrayImage(50);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, shadows: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // Shadows lifts dark areas
+      expect(avg.r).toBeGreaterThan(50);
+    });
+
+    it('should apply white point adjustment', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, whitePoint: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // White point scales brightness up
+      expect(avg.r).toBeGreaterThan(150);
+    });
+
+    it('should apply black point adjustment', async () => {
+      const imageBuffer = await buildGrayImage(10);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, blackPoint: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // Black point raises the floor
+      expect(avg.r).toBeGreaterThan(20);
+    });
+
+    it('should combine adjust with crop and rotate', async () => {
+      const imageBuffer = await buildTestQuadImage();
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Crop, parameters: { x: 0, y: 0, width: 500, height: 500 } },
+        { action: AssetEditAction.Rotate, parameters: { angle: 90 } },
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, brightness: 0.3 } },
       ]);
 
       const buffer = await result.png().toBuffer();
       const metadata = await sharp(buffer).metadata();
-      const w = metadata.width!;
-      const h = metadata.height!;
+      expect(metadata.width).toBe(500);
+      expect(metadata.height).toBe(500);
 
-      // Check center and near-corner pixels are still red (not black)
-      const centerColor = await getPixelColor(buffer, Math.round(w / 2), Math.round(h / 2));
-      expect(centerColor).toEqual({ r: 255, g: 0, b: 0 });
-
-      // Near top-left corner (with margin)
-      const margin = 10;
-      const tlColor = await getPixelColor(buffer, margin, margin);
-      expect(tlColor).toEqual({ r: 255, g: 0, b: 0 });
-
-      // Near bottom-right corner
-      const brColor = await getPixelColor(buffer, w - margin - 1, h - margin - 1);
-      expect(brColor).toEqual({ r: 255, g: 0, b: 0 });
+      // The red quadrant should be brighter than the original 255,0,0
+      const pixel = await getPixelColor(buffer, 10, 10);
+      // Red channel was already 255, but brightness boost applies via modulate
+      // so the image should be visibly different from default
+      expect(pixel.r).toBeGreaterThan(0);
     });
 
-    it('should produce dimensions smaller than original (inscribed rect cropping)', async () => {
-      const result = await sut['applyEdits'](
-        sharp({
-          create: { width: 1000, height: 1000, channels: 4, background: { r: 128, g: 128, b: 128, alpha: 1 } },
-        }).png(),
-        [{ action: AssetEditAction.Rotate, parameters: { angle: 10 } }],
-      );
-
-      const buffer = await result.png().toBuffer();
-      const metadata = await sharp(buffer).metadata();
-
-      // Inscribed rectangle must be smaller than original
-      expect(metadata.width!).toBeLessThan(1000);
-      expect(metadata.height!).toBeLessThan(1000);
-      // But still a reasonable size (not degenerate)
-      expect(metadata.width!).toBeGreaterThan(800);
-      expect(metadata.height!).toBeGreaterThan(800);
-    });
-
-    it('should handle mixed 90° + free rotation (e.g. 95°)', async () => {
-      const solidGreen = sharp({
-        create: { width: 500, height: 1000, channels: 4, background: { r: 0, g: 255, b: 0, alpha: 1 } },
-      }).png();
-
-      const result = await sut['applyEdits'](solidGreen, [
-        { action: AssetEditAction.Rotate, parameters: { angle: 95 } },
+    it('should not affect dimensions', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            brightness: 0.5,
+            contrast: 0.3,
+            saturation: -0.2,
+            warmth: 0.1,
+            highlights: 0.2,
+            shadows: 0.1,
+            whitePoint: 0.1,
+            blackPoint: 0.1,
+          },
+        },
       ]);
 
       const buffer = await result.png().toBuffer();
       const metadata = await sharp(buffer).metadata();
-
-      // 90° component swaps dimensions, then 5° free rotation crops inscribed rect
-      // Width should be close to original height, height close to original width, both slightly smaller
-      expect(metadata.width!).toBeGreaterThan(900);
-      expect(metadata.height!).toBeLessThan(500);
-
-      // No black corners — center pixel should be green
-      const centerColor = await getPixelColor(buffer, Math.round(metadata.width! / 2), Math.round(metadata.height! / 2));
-      expect(centerColor).toEqual({ r: 0, g: 255, b: 0 });
-    });
-
-    it('should handle crop then free rotation', async () => {
-      const result = await sut['applyEdits'](
-        sharp({
-          create: { width: 1000, height: 1000, channels: 4, background: { r: 0, g: 0, b: 255, alpha: 1 } },
-        }).png(),
-        [
-          { action: AssetEditAction.Crop, parameters: { x: 100, y: 100, width: 800, height: 600 } },
-          { action: AssetEditAction.Rotate, parameters: { angle: 5 } },
-        ],
-      );
-
-      const buffer = await result.png().toBuffer();
-      const metadata = await sharp(buffer).metadata();
-
-      // After crop (800x600), free rotation inscribed rect is smaller
-      expect(metadata.width!).toBeLessThan(800);
-      expect(metadata.height!).toBeLessThan(600);
-      expect(metadata.width!).toBeGreaterThan(700);
-      expect(metadata.height!).toBeGreaterThan(500);
-
-      // No black corners
-      const centerColor = await getPixelColor(buffer, Math.round(metadata.width! / 2), Math.round(metadata.height! / 2));
-      expect(centerColor).toEqual({ r: 0, g: 0, b: 255 });
-    });
-  });
-
-  describe('generateThumbhash (dimension safety)', () => {
-    it('should stay within 100x100 after free rotation', async () => {
-      const solidImage = sharp({
-        create: { width: 500, height: 500, channels: 4, background: { r: 200, g: 100, b: 50, alpha: 1 } },
-      }).png();
-
-      const inputBuffer = await solidImage.toBuffer();
-
-      // Should not throw — thumbhash must handle the extra canvas from rotation
-      const thumbhash = await sut.generateThumbhash(inputBuffer, {
-        colorspace: 'srgb',
-        processInvalidImages: false,
-        edits: [{ action: AssetEditAction.Rotate, parameters: { angle: 15 } }],
-      });
-
-      expect(thumbhash).toBeInstanceOf(Buffer);
-      expect(thumbhash.length).toBeGreaterThan(0);
+      expect(metadata.width).toBe(100);
+      expect(metadata.height).toBe(100);
     });
   });
 

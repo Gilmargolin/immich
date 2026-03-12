@@ -149,6 +149,7 @@ export class MediaRepository {
     const crop = edits.find((edit) => edit.action === 'crop');
     const rotateEdit = edits.find((edit) => edit.action === 'rotate');
     const mirrorEdits = edits.filter((edit) => edit.action === 'mirror');
+    const adjustEdit = edits.find((edit) => edit.action === 'adjust');
 
     // 1. Apply crop
     if (crop) {
@@ -222,6 +223,77 @@ export class MediaRepository {
 
         pipeline = sharp(rotated.data, { raw: { width: rW, height: rH, channels: rotated.info.channels } })
           .extract({ left, top, width: extractW, height: extractH });
+      }
+    }
+
+    // 4. Apply color/lighting adjustments
+    if (adjustEdit) {
+      const params = adjustEdit.parameters;
+      const modulate: { brightness?: number; saturation?: number; hue?: number } = {};
+
+      // Brightness: Sharp modulate uses multiplier (1 = unchanged, >1 brighter, <1 darker)
+      if (params.brightness !== 0) {
+        modulate.brightness = 1 + params.brightness;
+      }
+
+      // Saturation: Sharp modulate uses multiplier (1 = unchanged, >1 more saturated, 0 = greyscale)
+      if (params.saturation !== 0) {
+        modulate.saturation = 1 + params.saturation;
+      }
+
+      // Warmth: shift hue slightly (positive = warmer/yellow, negative = cooler/blue)
+      if (params.warmth !== 0) {
+        modulate.hue = Math.round(params.warmth * 30);
+      }
+
+      if (Object.keys(modulate).length > 0) {
+        pipeline = pipeline.modulate(modulate);
+      }
+
+      // Contrast: use linear transform (a * pixel + b)
+      if (params.contrast !== 0) {
+        const factor = 1 + params.contrast;
+        const offset = 128 * (1 - factor);
+        pipeline = pipeline.linear(factor, offset);
+      }
+
+      // Tint: apply a subtle color tint via tint()
+      if (params.tint !== 0) {
+        const tintValue = params.tint;
+        // Positive = green tint, negative = magenta tint
+        const r = tintValue < 0 ? 255 : Math.round(255 - tintValue * 40);
+        const g = tintValue > 0 ? 255 : Math.round(255 + tintValue * 40);
+        const b = tintValue < 0 ? 255 : Math.round(255 - tintValue * 40);
+        pipeline = pipeline.tint({ r, g, b });
+      }
+
+      // Highlights: brighten/darken light areas
+      if (params.highlights !== 0) {
+        if (params.highlights > 0) {
+          // Brighten highlights: use output-only gamma (input gamma=1.0, output gamma>1)
+          const gammaOut = 1 + params.highlights * 1.5;
+          pipeline = pipeline.gamma(1.0, Math.min(3.0, gammaOut));
+        } else {
+          // Darken highlights: reduce slope
+          const factor = 1 + params.highlights * 0.4;
+          pipeline = pipeline.linear(factor, 0);
+        }
+      }
+
+      // Shadows: lift dark areas using linear offset
+      if (params.shadows !== 0) {
+        pipeline = pipeline.linear(1 - params.shadows * 0.15, params.shadows * 40);
+      }
+
+      // White point: scale maximum brightness
+      if (params.whitePoint !== 0) {
+        const scale = 1 + params.whitePoint * 0.5;
+        pipeline = pipeline.linear(scale, 0);
+      }
+
+      // Black point: raise the floor of dark pixels
+      if (params.blackPoint !== 0) {
+        pipeline = pipeline.linear(1, params.blackPoint * 50);
       }
     }
 
