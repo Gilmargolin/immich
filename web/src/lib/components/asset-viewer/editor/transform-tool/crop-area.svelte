@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { getAssetMediaUrl } from '$lib/utils';
   import { getAltText } from '$lib/utils/thumbnail-util';
@@ -14,9 +15,38 @@
 
   let canvasContainer = $state<HTMLElement | null>(null);
 
+  let adjustParams = $derived(adjustManager.svgFilterParams);
+  let hasAdjustments = $derived(adjustManager.canReset);
+  let saturationMatrix = $derived.by(() => {
+    const s = 1 + adjustManager.values.saturation;
+    const lumR = 0.3086;
+    const lumG = 0.6094;
+    const lumB = 0.0820;
+    return [
+      (lumR * (1 - s)) + s, lumG * (1 - s),       lumB * (1 - s),       0, 0,
+      lumR * (1 - s),       (lumG * (1 - s)) + s,  lumB * (1 - s),       0, 0,
+      lumR * (1 - s),       lumG * (1 - s),        (lumB * (1 - s)) + s, 0, 0,
+      0,                    0,                      0,                    1, 0,
+    ].join(' ');
+  });
+
   let imageSrc = $derived(
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
   );
+
+  let cropImgEl = $state<HTMLImageElement | null>(null);
+
+  // Force browser to re-evaluate SVG filter when adjust params change.
+  // Browsers cache SVG filter results and may not re-render when filter attributes update.
+  $effect(() => {
+    const _p = adjustParams;
+    const _s = saturationMatrix;
+    if (cropImgEl) {
+      cropImgEl.style.filter = 'none';
+      void cropImgEl.offsetWidth;
+      cropImgEl.style.filter = 'url(#crop-adjust-filter)';
+    }
+  });
 
   /**
    * Calculate the scale factor needed so the rotated image fully covers the crop frame.
@@ -162,6 +192,20 @@
   }
 </script>
 
+<svg class="absolute" width="0" height="0">
+  <defs>
+    <filter id="crop-adjust-filter" color-interpolation-filters="sRGB">
+      <feComponentTransfer>
+        <feFuncR type="gamma" amplitude={adjustParams.r.slope} exponent={adjustParams.r.gamma} offset={adjustParams.r.intercept} />
+        <feFuncG type="gamma" amplitude={adjustParams.g.slope} exponent={adjustParams.g.gamma} offset={adjustParams.g.intercept} />
+        <feFuncB type="gamma" amplitude={adjustParams.b.slope} exponent={adjustParams.b.gamma} offset={adjustParams.b.intercept} />
+      </feComponentTransfer>
+      {#if adjustManager.values.saturation !== 0}
+        <feColorMatrix type="matrix" values={saturationMatrix} />
+      {/if}
+    </filter>
+  </defs>
+</svg>
 <div class="canvas-container" bind:this={canvasContainer}>
   <div class="crop-viewport">
     <button
@@ -174,10 +218,11 @@
       type="button"
     >
       <img
+        bind:this={cropImgEl}
         draggable="false"
         src={imageSrc}
         alt={$getAltText(toTimelineAsset(asset))}
-        style={imageTransform ? `transform: ${imageTransform}` : ''}
+        style="{imageTransform ? `transform: ${imageTransform};` : ''} filter: url(#crop-adjust-filter);"
       />
       <div
         class={`${showGrid ? 'resizing' : ''} crop-frame`}
