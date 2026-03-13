@@ -38,7 +38,8 @@
   onMount(async () => {
     const editsData = await getAssetEdits({ id: asset.id });
     await editManager.initializeAllTools(asset, editsData);
-    editManager.isCropMode = true;
+    const hasAdjustEdits = editsData.edits.some((e) => e.action === 'adjust');
+    editManager.isCropMode = !hasAdjustEdits;
   });
 
   onDestroy(() => {

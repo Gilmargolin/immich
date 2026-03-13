@@ -1,7 +1,7 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
-  import { getAssetUrl } from '$lib/utils';
-  import type { AssetResponseDto } from '@immich/sdk';
+  import { getAssetMediaUrl } from '$lib/utils';
+  import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
 
   interface Props {
     asset: AssetResponseDto;
@@ -9,7 +9,11 @@
 
   let { asset }: Props = $props();
 
-  let imageUrl = $derived(getAssetUrl({ asset }));
+  let imgEl = $state<HTMLImageElement | null>(null);
+
+  let imageUrl = $derived(
+    getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
+  );
   let params = $derived(adjustManager.svgFilterParams);
 
   // Saturation matrix for feColorMatrix
@@ -25,6 +29,18 @@
       lumR * (1 - s),       lumG * (1 - s),        (lumB * (1 - s)) + s, 0, 0,
       0,                    0,                      0,                    1, 0,
     ].join(' ');
+  });
+
+  // Force browser to re-evaluate SVG filter when params change.
+  // Browsers cache SVG filter results and may not re-render when filter attributes update.
+  $effect(() => {
+    const _p = params;
+    const _s = saturationMatrix;
+    if (imgEl) {
+      imgEl.style.filter = 'none';
+      void imgEl.offsetWidth;
+      imgEl.style.filter = 'url(#adjust-filter)';
+    }
   });
 </script>
 
@@ -48,6 +64,7 @@
   </svg>
 
   <img
+    bind:this={imgEl}
     src={imageUrl}
     alt="Adjust preview"
     class="max-h-full max-w-full object-contain"
