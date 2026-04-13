@@ -2,7 +2,7 @@
   import ServerAboutItem from '$lib/components/ServerAboutItem.svelte';
   import { locale } from '$lib/stores/preferences.store';
   import { type ServerAboutResponseDto, type ServerVersionHistoryResponseDto } from '@immich/sdk';
-  import { Alert, Label, Modal, ModalBody } from '@immich/ui';
+  import { Label, Modal, ModalBody } from '@immich/ui';
   import { DateTime } from 'luxon';
   import { t } from 'svelte-i18n';
 
@@ -18,10 +18,6 @@
 <Modal title={$t('about')} {onClose}>
   <ModalBody>
     <div class="flex flex-col sm:grid sm:grid-cols-2 gap-4">
-      {#if info.sourceRef === 'main' && info.repository === 'immich-app/immich'}
-        <Alert color="warning" title={$t('main_branch_warning')} class="col-span-full" size="small" />
-      {/if}
-
       <ServerAboutItem id="immich" title="Immich" version={info.version} versionHref={info.versionUrl} />
       <ServerAboutItem id="exif" title="ExifTool" version={info.exiftool} />
       <ServerAboutItem id="nodejs" title="Node.js" version={info.nodejs} />
