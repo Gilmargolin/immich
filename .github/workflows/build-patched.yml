@@ -46,8 +46,8 @@ jobs:
           file: server/Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/immich-server:latest
-            ghcr.io/${{ github.repository_owner }}/immich-server:${{ github.sha }}
+            ghcr.io/gilmargolin/immich-server:latest
+            ghcr.io/gilmargolin/immich-server:${{ github.sha }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
