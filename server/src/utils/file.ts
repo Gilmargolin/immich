@@ -25,6 +25,7 @@ export class ImmichFileResponse {
   public readonly contentType!: string;
   public readonly cacheControl!: CacheControl;
   public readonly fileName?: string;
+  public readonly disposition?: 'inline' | 'attachment';
 
   constructor(response: ImmichFileResponse) {
     Object.assign(this, response);
@@ -60,7 +61,13 @@ export const sendFile = async (
 
     res.header('Content-Type', file.contentType);
     if (file.fileName) {
-      res.header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`);
+      const disposition = file.disposition ?? 'inline';
+      const encodedFilename = encodeURIComponent(file.fileName);
+      const asciiFilename = file.fileName.replaceAll(/[^\w.()-]/g, '_');
+      res.header(
+        'Content-Disposition',
+        `${disposition}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`,
+      );
     }
 
     await access(file.path, constants.R_OK);

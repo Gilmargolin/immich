@@ -217,6 +217,7 @@ export class AssetMediaService extends BaseService {
       fileName: getFileNameWithoutExtension(originalFileName) + getFilenameExtension(path),
       contentType: mimeTypes.lookup(path),
       cacheControl: CacheControl.PrivateWithCache,
+      disposition: 'attachment',
     });
   }
 

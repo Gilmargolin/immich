@@ -485,6 +485,7 @@ describe(AssetMediaService.name, () => {
           fileName: asset.originalFileName,
           contentType: 'image/jpeg',
           cacheControl: CacheControl.PrivateWithCache,
+          disposition: 'attachment',
         }),
       );
     });
@@ -505,6 +506,7 @@ describe(AssetMediaService.name, () => {
           fileName: editedAsset.originalFileName,
           contentType: 'image/jpeg',
           cacheControl: CacheControl.PrivateWithCache,
+          disposition: 'attachment',
         }),
       );
     });
@@ -525,6 +527,7 @@ describe(AssetMediaService.name, () => {
           fileName: editedAsset.originalFileName,
           contentType: 'image/jpeg',
           cacheControl: CacheControl.PrivateWithCache,
+          disposition: 'attachment',
         }),
       );
     });
@@ -544,6 +547,7 @@ describe(AssetMediaService.name, () => {
           fileName: editedAsset.originalFileName,
           contentType: 'image/jpeg',
           cacheControl: CacheControl.PrivateWithCache,
+          disposition: 'attachment',
         }),
       );
     });
@@ -564,6 +568,7 @@ describe(AssetMediaService.name, () => {
           fileName: editedAsset.originalFileName,
           contentType: 'image/jpeg',
           cacheControl: CacheControl.PrivateWithCache,
+          disposition: 'attachment',
         }),
       );
     });
