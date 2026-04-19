@@ -3,7 +3,6 @@
 </script>
 
 <script lang="ts">
-  import { page } from '$app/state';
   import { clickOutside } from '$lib/actions/click-outside';
   import NotificationPanel from '$lib/components/shared-components/navigation-bar/notification-panel.svelte';
   import SearchBar from '$lib/components/shared-components/search-bar/search-bar.svelte';
@@ -15,11 +14,10 @@
   import { notificationManager } from '$lib/stores/notification-manager.svelte';
   import { sidebarStore } from '$lib/stores/sidebar.svelte';
   import { user } from '$lib/stores/user.store';
-  import { ActionButton, Button, IconButton, Logo } from '@immich/ui';
-  import { mdiBellBadge, mdiBellOutline, mdiMagnify, mdiMenu, mdiTrayArrowUp } from '@mdi/js';
+  import { ActionButton, IconButton, Logo } from '@immich/ui';
+  import { mdiMagnify } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
-  import ThemeButton from '../theme-button.svelte';
   import UserAvatar from '../user-avatar.svelte';
   import AccountInfoPanel from './account-info-panel.svelte';
 
@@ -35,6 +33,7 @@
   let shouldShowNotificationPanel = $state(false);
   let innerWidth: number = $state(0);
   const hasUnreadNotifications = $derived(notificationManager.notifications.length > 0);
+  const notificationCount = $derived(notificationManager.notifications.length);
 
   onMount(async () => {
     try {
@@ -57,14 +56,11 @@
       : ''} {noBorder ? '' : 'border-b'}"
   >
     <div class="flex flex-row gap-1 mx-4 items-center">
-      <IconButton
+      <button
         id={menuButtonId}
-        shape="round"
-        color="secondary"
-        variant="ghost"
-        size="medium"
+        type="button"
         aria-label={$t('main_menu')}
-        icon={mdiMenu}
+        class="flex items-center rounded-full p-1 hover:bg-immich-primary/10 dark:hover:bg-immich-dark-primary/10 transition-colors cursor-pointer"
         onclick={() => {
           sidebarStore.toggle();
         }}
@@ -74,10 +70,9 @@
             event.stopPropagation();
           }
         }}
-      />
-      <a data-sveltekit-preload-data="hover" href={Route.photos()}>
+      >
         <Logo variant="icon" class="max-md:h-12" />
-      </a>
+      </button>
     </div>
     <div class="flex justify-between gap-4 lg:gap-8 pe-6">
       <div class="hidden w-full max-w-5xl flex-1 tall:ps-0 sm:block">
@@ -101,30 +96,7 @@
           />
         {/if}
 
-        {#if !page.url.pathname.includes('/admin') && onUploadClick}
-          <Button
-            leadingIcon={mdiTrayArrowUp}
-            onclick={onUploadClick}
-            class="hidden lg:flex"
-            variant="ghost"
-            size="medium"
-            color="secondary"
-            >{$t('upload')}
-          </Button>
-          <IconButton
-            color="secondary"
-            shape="round"
-            variant="ghost"
-            size="medium"
-            onclick={onUploadClick}
-            title={$t('upload')}
-            aria-label={$t('upload')}
-            icon={mdiTrayArrowUp}
-            class="lg:hidden"
-          />
-        {/if}
-
-        <ThemeButton />
+        <ActionButton action={Cast} />
 
         <div
           use:clickOutside={{
@@ -132,32 +104,10 @@
             onEscape: () => (shouldShowNotificationPanel = false),
           }}
         >
-          <div class="relative">
-            <IconButton
-              shape="round"
-              color={hasUnreadNotifications ? 'primary' : 'secondary'}
-              variant="ghost"
-              size="medium"
-              icon={hasUnreadNotifications ? mdiBellBadge : mdiBellOutline}
-              onclick={() => (shouldShowNotificationPanel = !shouldShowNotificationPanel)}
-              aria-label={$t('notifications')}
-            />
-
-            {#if hasUnreadNotifications}
-              <div
-                class="pointer-events-none absolute border top-0 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-light"
-              >
-                {notificationManager.notifications.length}
-              </div>
-            {/if}
-          </div>
-
           {#if shouldShowNotificationPanel}
             <NotificationPanel />
           {/if}
         </div>
-
-        <ActionButton action={Cast} />
 
         <div
           use:clickOutside={{
@@ -167,17 +117,27 @@
         >
           <button
             type="button"
-            class="flex ps-2"
+            class="flex ps-2 relative"
             onclick={() => (shouldShowAccountInfoPanel = !shouldShowAccountInfoPanel)}
             title={`${$user.name} (${$user.email})`}
           >
             {#key $user}
               <UserAvatar user={$user} size="md" noTitle interactive />
             {/key}
+            {#if hasUnreadNotifications}
+              <span
+                class="pointer-events-none absolute top-0 end-0 h-3 w-3 rounded-full bg-primary border-2 border-light dark:border-immich-dark-bg"
+                aria-hidden="true"
+              ></span>
+            {/if}
           </button>
 
           {#if shouldShowAccountInfoPanel}
             <AccountInfoPanel
+              {onUploadClick}
+              {hasUnreadNotifications}
+              {notificationCount}
+              onShowNotifications={() => (shouldShowNotificationPanel = true)}
               onLogout={() => authManager.logout()}
               onClose={() => (shouldShowAccountInfoPanel = false)}
             />

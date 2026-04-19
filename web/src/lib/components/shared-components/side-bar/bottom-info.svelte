@@ -5,11 +5,11 @@
 </script>
 
 <div class="mt-auto">
-  <StorageSpace />
+  <PurchaseInfo />
 </div>
 
-<PurchaseInfo />
+<StorageSpace />
 
-<div class="mb-6 mt-2">
+<div class="mb-6">
   <ServerStatus />
 </div>
