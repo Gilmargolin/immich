@@ -13,7 +13,7 @@
 
   let { ariaLabel, children }: Props = $props();
 
-  const isHidden = $derived(!sidebarStore.isOpen && !mediaQueryManager.isFullSidebar);
+  const isHidden = $derived(!sidebarStore.isOpen);
   const isExpanded = $derived(sidebarStore.isOpen && !mediaQueryManager.isFullSidebar);
 
   onMount(() => {
@@ -35,7 +35,7 @@
   id="sidebar"
   aria-label={ariaLabel}
   tabindex="-1"
-  class="immich-scrollbar relative z-1 w-0 sidebar:w-64 overflow-y-auto overflow-x-hidden pt-8 transition-all duration-200 bg-light"
+  class="immich-scrollbar relative z-1 w-0 overflow-y-auto overflow-x-hidden pt-8 transition-all duration-200 bg-light"
   class:shadow-2xl={isExpanded}
   class:dark:border-e-immich-dark-gray={isExpanded}
   class:border-r={isExpanded}

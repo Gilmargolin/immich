@@ -12,7 +12,6 @@
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import { Route } from '$lib/route';
   import { getGlobalActions } from '$lib/services/app.service';
-  import { mediaQueryManager } from '$lib/stores/media-query-manager.svelte';
   import { notificationManager } from '$lib/stores/notification-manager.svelte';
   import { sidebarStore } from '$lib/stores/sidebar.svelte';
   import { user } from '$lib/stores/user.store';
@@ -53,9 +52,9 @@
 <nav id="dashboard-navbar" class="max-md:h-(--navbar-height-md) h-(--navbar-height) w-dvw text-sm">
   <SkipLink text={$t('skip_to_content')} />
   <div
-    class="grid h-full grid-cols-[--spacing(32)_auto] items-center py-2 sidebar:grid-cols-[--spacing(64)_auto] {noBorder
-      ? ''
-      : 'border-b'}"
+    class="grid h-full grid-cols-[--spacing(32)_auto] items-center py-2 {sidebarStore.isOpen
+      ? 'sidebar:grid-cols-[--spacing(64)_auto]'
+      : ''} {noBorder ? '' : 'border-b'}"
   >
     <div class="flex flex-row gap-1 mx-4 items-center">
       <IconButton
@@ -75,10 +74,9 @@
             event.stopPropagation();
           }
         }}
-        class="sidebar:hidden"
       />
       <a data-sveltekit-preload-data="hover" href={Route.photos()}>
-        <Logo variant={mediaQueryManager.isFullSidebar ? 'inline' : 'icon'} class="max-md:h-12" />
+        <Logo variant="icon" class="max-md:h-12" />
       </a>
     </div>
     <div class="flex justify-between gap-4 lg:gap-8 pe-6">
