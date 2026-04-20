@@ -137,7 +137,9 @@ class TransformManager implements EditToolManager {
 
     if (this.checkCropEdits()) {
       // Convert from display coordinates to loaded preview image coordinates
+      const displayRegion = { ...this.region };
       let cropRegion = this.getRegionInPreviewCoords(this.region);
+      const previewCropRegion = { ...cropRegion };
 
       // Transform crop coordinates to account for mirroring
       // The preview shows the mirrored image, but crop is applied before mirror on the server
@@ -153,6 +155,20 @@ class TransformManager implements EditToolManager {
 
       // Constrain to original image bounds (fixes possible rounding errors)
       cropRegion = this.constrainToBounds(cropRegion, this.originalImageSize);
+
+      // Diagnostic: log the full coordinate journey so we can see where a
+      // wrong-sub-area crop is coming from. Remove once the bug is pinned.
+      // eslint-disable-next-line no-console
+      console.info('[crop] getEdits', {
+        display: displayRegion,
+        cropImageScale: this.cropImageScale,
+        cropImageSize: { ...this.cropImageSize },
+        previewCoords: previewCropRegion,
+        originalImageSize: { ...this.originalImageSize },
+        mirrorHorizontal: this.mirrorHorizontal,
+        mirrorVertical: this.mirrorVertical,
+        sent: cropRegion,
+      });
 
       edits.push({
         action: AssetEditAction.Crop,
