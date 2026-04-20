@@ -4,9 +4,11 @@
   import { shortcut } from '$lib/actions/shortcut';
   import DownloadPanel from '$lib/components/asset-viewer/download-panel.svelte';
   import ErrorLayout from '$lib/components/layouts/ErrorLayout.svelte';
+  import NotificationBar from '$lib/components/notification-bar.svelte';
   import OnEvents from '$lib/components/OnEvents.svelte';
   import NavigationLoadingBar from '$lib/components/shared-components/navigation-loading-bar.svelte';
   import UploadPanel from '$lib/components/shared-components/upload-panel.svelte';
+  import '$lib/utils/patch-toast';
 
   import { eventManager } from '$lib/managers/event-manager.svelte';
   import { serverConfigManager } from '$lib/managers/server-config-manager.svelte';
@@ -27,7 +29,6 @@
     modalManager,
     setLocale,
     setTranslations,
-    toastManager,
     type ActionItem,
   } from '@immich/ui';
   import { mdiAccountMultipleOutline, mdiBookshelf, mdiCog, mdiServer, mdiSync, mdiThemeLightDark } from '@mdi/js';
@@ -80,8 +81,6 @@
   const getMyImmichLink = () => {
     return new URL(page.url.pathname + page.url.search, 'https://my.immich.app');
   };
-
-  toastManager.setOptions({ class: 'top-16 fixed' });
 
   onMount(() => {
     const element = document.querySelector('#stencil');
@@ -250,4 +249,5 @@
 
   <DownloadPanel />
   <UploadPanel />
+  <NotificationBar />
 </TooltipProvider>
