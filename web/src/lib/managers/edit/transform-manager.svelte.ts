@@ -214,10 +214,25 @@ class TransformManager implements EditToolManager {
     this.cropZoom = 1;
     this.mirrorHorizontal = false;
     this.mirrorVertical = false;
+    this.cropAspectRatio = 'free';
 
     await tick();
 
     this.onImageLoad([]);
+
+    // eslint-disable-next-line no-console
+    console.info('[reset] after onImageLoad([])', {
+      region: { ...this.region },
+      cropImageSize: { ...this.cropImageSize },
+      cropImageScale: this.cropImageScale,
+      cropFrameBound: !!this.cropFrame,
+      cropAreaBound: !!this.cropAreaEl,
+    });
+
+    // Safety: re-draw on the next frame in case the DOM wasn't ready when
+    // onImageLoad ran. Without this, the crop frame can stay stuck on the
+    // previously-saved crop even after reset.
+    requestAnimationFrame(() => this.draw());
   }
 
   async onActivate(asset: AssetResponseDto, edits: EditActions): Promise<void> {
@@ -505,6 +520,15 @@ class TransformManager implements EditToolManager {
 
       if (cropEdit) {
         const params = cropEdit.parameters as CropParameters;
+
+        // eslint-disable-next-line no-console
+        console.info('[crop] onImageLoad restoring saved crop', {
+          storedCrop: { ...params },
+          originalImageSize: { ...this.originalImageSize },
+          cropImageSize: { ...this.cropImageSize },
+          imgNaturalWidth: img.width,
+          imgNaturalHeight: img.height,
+        });
 
         // convert from original image coordinates to loaded preview image coordinates
         // eslint-disable-next-line prefer-const
