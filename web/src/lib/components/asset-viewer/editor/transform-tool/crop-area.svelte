@@ -34,17 +34,16 @@
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
   );
 
-  let cropImgEl = $state<HTMLImageElement | null>(null);
-
   // Force browser to re-evaluate SVG filter when adjust params change.
   // Browsers cache SVG filter results and may not re-render when filter attributes update.
   $effect(() => {
     const _p = adjustParams;
     const _s = saturationMatrix;
-    if (cropImgEl) {
-      cropImgEl.style.filter = 'none';
-      void cropImgEl.offsetWidth;
-      cropImgEl.style.filter = 'url(#crop-adjust-filter)';
+    const el = transformManager.domImgEl;
+    if (el) {
+      el.style.filter = 'none';
+      void el.offsetWidth;
+      el.style.filter = 'url(#crop-adjust-filter)';
     }
   });
 
@@ -100,11 +99,17 @@
       return;
     }
 
+    // Observe both the outer container (catches window resize) and the
+    // <img> itself (catches cases where CSS changes the image's rendered
+    // size without changing the container — e.g. `width: max-content` on
+    // the parent pinning it while the image still flexes via height: 100%).
     const resizeObserver = new ResizeObserver(() => {
       transformManager.resizeCanvas();
     });
-
     resizeObserver.observe(canvasContainer);
+    if (transformManager.domImgEl) {
+      resizeObserver.observe(transformManager.domImgEl);
+    }
 
     return () => {
       resizeObserver.disconnect();
@@ -218,7 +223,7 @@
       type="button"
     >
       <img
-        bind:this={cropImgEl}
+        bind:this={transformManager.domImgEl}
         draggable="false"
         src={imageSrc}
         alt={$getAltText(toTimelineAsset(asset))}

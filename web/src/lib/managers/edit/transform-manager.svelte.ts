@@ -60,6 +60,11 @@ class TransformManager implements EditToolManager {
   dragAnchor = $state({ x: 0, y: 0 });
   resizeSide = $state(ResizeBoundary.None);
   imgElement = $state<HTMLImageElement | null>(null);
+  // The DOM <img> that's actually rendered inside the crop area. We need
+  // its live clientWidth to compute the scale accurately on resize —
+  // cropAreaEl.clientWidth can get pinned to the image's intrinsic size
+  // by CSS `width: max-content` and stop tracking the viewport.
+  domImgEl = $state<HTMLImageElement | null>(null);
   cropAreaEl = $state<HTMLElement | null>(null);
   overlayEl = $state<HTMLElement | null>(null);
   cropFrame = $state<HTMLElement | null>(null);
@@ -270,6 +275,7 @@ class TransformManager implements EditToolManager {
     this.dragAnchor = { x: 0, y: 0 };
     this.resizeSide = ResizeBoundary.None;
     this.imgElement = null;
+    this.domImgEl = null;
     this.cropAreaEl = null;
     this.isDragging = false;
     this.isRotating = false;
@@ -552,19 +558,29 @@ class TransformManager implements EditToolManager {
 
   calculateScale(): number {
     const img = this.imgElement;
-    const cropArea = this.cropAreaEl;
-
-    if (!cropArea || !img) {
+    if (!img || img.width === 0) {
       return 1;
     }
 
-    const containerWidth = cropArea.clientWidth;
-    const containerHeight = cropArea.clientHeight;
+    // Prefer the actual rendered width of the DOM <img>. CSS controls how
+    // the image fits its parent; reading clientWidth gives us whatever
+    // scale the browser ended up picking, which stays correct when the
+    // window resizes. The cropArea.clientWidth path below is a fallback
+    // for the first pre-mount tick before domImgEl is bound.
+    const domImg = this.domImgEl;
+    if (domImg && domImg.clientWidth > 0) {
+      return domImg.clientWidth / img.width;
+    }
+
+    const cropArea = this.cropAreaEl;
+    if (!cropArea) {
+      return 1;
+    }
 
     // Fit image to container while maintaining aspect ratio
-    let scale = containerWidth / img.width;
-    if (img.height * scale > containerHeight) {
-      scale = containerHeight / img.height;
+    let scale = cropArea.clientWidth / img.width;
+    if (img.height * scale > cropArea.clientHeight) {
+      scale = cropArea.clientHeight / img.height;
     }
 
     return scale;
