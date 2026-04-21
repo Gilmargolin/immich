@@ -38,8 +38,11 @@
   onMount(async () => {
     const editsData = await getAssetEdits({ id: asset.id });
     await editManager.initializeAllTools(asset, editsData);
-    const hasAdjustEdits = editsData.edits.some((e) => e.action === 'adjust');
-    editManager.isCropMode = !hasAdjustEdits;
+    // Always open in crop mode so the CropArea viewer is visible. CropArea
+    // renders the photo with both the crop frame overlay AND the live SVG
+    // filter for color/light adjustments, so nothing is lost by staying
+    // here while the user moves sliders.
+    editManager.isCropMode = true;
   });
 
   onDestroy(() => {
@@ -262,7 +265,7 @@
         icon={slider.icon}
         label={$t(slider.labelKey)}
         value={adjustManager.values[slider.key]}
-        onchange={(v) => { exitCropMode(); adjustManager.setValue(slider.key, v); }}
+        onchange={(v) => adjustManager.setValue(slider.key, v)}
       />
     {/each}
 
@@ -273,7 +276,7 @@
         icon={slider.icon}
         label={$t(slider.labelKey)}
         value={adjustManager.values[slider.key]}
-        onchange={(v) => { exitCropMode(); adjustManager.setValue(slider.key, v); }}
+        onchange={(v) => adjustManager.setValue(slider.key, v)}
       />
     {/each}
   </div>
