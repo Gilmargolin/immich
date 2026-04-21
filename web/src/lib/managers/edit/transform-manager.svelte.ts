@@ -73,6 +73,15 @@ class TransformManager implements EditToolManager {
     height: this.cropImageSize.height * this.cropImageScale,
   });
 
+  // Displayed image dimensions in layout pixels. Use these to clamp the crop
+  // region during move/resize/reset instead of cropArea.clientWidth/Height:
+  // when the container is larger than the displayed image (letterbox area
+  // around an aspect-mismatched image), cropArea bounds allow the crop frame
+  // to extend into dead space, which the server then silently truncates on
+  // save → produces a different sub-area than what the user drew.
+  displayedImageWidth = $derived(this.cropImageSize.width * this.cropImageScale);
+  displayedImageHeight = $derived(this.cropImageSize.height * this.cropImageScale);
+
   // CSS zoom applied after crop resize so the crop fills the editing area
   cropZoom = $state(1);
   // Frozen region used for zoom centering during drag — prevents coordinate drift
@@ -137,9 +146,7 @@ class TransformManager implements EditToolManager {
 
     if (this.checkCropEdits()) {
       // Convert from display coordinates to loaded preview image coordinates
-      const displayRegion = { ...this.region };
       let cropRegion = this.getRegionInPreviewCoords(this.region);
-      const previewCropRegion = { ...cropRegion };
 
       // Transform crop coordinates to account for mirroring
       // The preview shows the mirrored image, but crop is applied before mirror on the server
@@ -155,20 +162,6 @@ class TransformManager implements EditToolManager {
 
       // Constrain to original image bounds (fixes possible rounding errors)
       cropRegion = this.constrainToBounds(cropRegion, this.originalImageSize);
-
-      // Diagnostic: log the full coordinate journey so we can see where a
-      // wrong-sub-area crop is coming from. Remove once the bug is pinned.
-      // eslint-disable-next-line no-console
-      console.info('[crop] getEdits', {
-        display: displayRegion,
-        cropImageScale: this.cropImageScale,
-        cropImageSize: { ...this.cropImageSize },
-        previewCoords: previewCropRegion,
-        originalImageSize: { ...this.originalImageSize },
-        mirrorHorizontal: this.mirrorHorizontal,
-        mirrorVertical: this.mirrorVertical,
-        sent: cropRegion,
-      });
 
       edits.push({
         action: AssetEditAction.Crop,
@@ -219,15 +212,6 @@ class TransformManager implements EditToolManager {
     await tick();
 
     this.onImageLoad([]);
-
-    // eslint-disable-next-line no-console
-    console.info('[reset] after onImageLoad([])', {
-      region: { ...this.region },
-      cropImageSize: { ...this.cropImageSize },
-      cropImageScale: this.cropImageScale,
-      cropFrameBound: !!this.cropFrame,
-      cropAreaBound: !!this.cropAreaEl,
-    });
 
     // Safety: re-draw on the next frame in case the DOM wasn't ready when
     // onImageLoad ran. Without this, the crop frame can stay stuck on the
@@ -337,13 +321,16 @@ class TransformManager implements EditToolManager {
       return this.region;
     }
 
-    const canvasW = this.cropAreaEl.clientWidth;
-    const canvasH = this.cropAreaEl.clientHeight;
+    // Size the new crop against the displayed image, not the cropArea
+    // container. If the container is larger due to letterboxing, using
+    // container dims would produce a crop that extends into empty space.
+    const canvasW = this.displayedImageWidth;
+    const canvasH = this.displayedImageHeight;
 
     const [widthRatio, heightRatio] = aspectRatio.split(':').map(Number);
 
     if (!widthRatio || !heightRatio) {
-      // Free crop — return full canvas
+      // Free crop — return full image area
       return { x: 0, y: 0, width: canvasW, height: canvasH };
     }
 
@@ -351,18 +338,18 @@ class TransformManager implements EditToolManager {
     let newWidth: number;
     let newHeight: number;
 
-    // Inscribe within full canvas so crop fills the editing area
+    // Inscribe within the image so crop fills as much of the image as possible
     if (canvasW / canvasH > ratio) {
-      // Canvas is wider than ratio — height fills, width shrinks
+      // Image is wider than ratio — height fills, width shrinks
       newHeight = canvasH;
       newWidth = newHeight * ratio;
     } else {
-      // Canvas is taller than ratio — width fills, height shrinks
+      // Image is taller than ratio — width fills, height shrinks
       newWidth = canvasW;
       newHeight = newWidth / ratio;
     }
 
-    // Center in canvas
+    // Center in image area
     return {
       x: (canvasW - newWidth) / 2,
       y: (canvasH - newHeight) / 2,
@@ -520,15 +507,6 @@ class TransformManager implements EditToolManager {
 
       if (cropEdit) {
         const params = cropEdit.parameters as CropParameters;
-
-        // eslint-disable-next-line no-console
-        console.info('[crop] onImageLoad restoring saved crop', {
-          storedCrop: { ...params },
-          originalImageSize: { ...this.originalImageSize },
-          cropImageSize: { ...this.cropImageSize },
-          imgNaturalWidth: img.width,
-          imgNaturalHeight: img.height,
-        });
 
         // convert from original image coordinates to loaded preview image coordinates
         // eslint-disable-next-line prefer-const
@@ -790,8 +768,9 @@ class TransformManager implements EditToolManager {
     }
 
     this.hasChanges = true;
-    this.region.x = clamp(mouseX - this.dragAnchor.x, 0, cropArea.clientWidth - this.region.width);
-    this.region.y = clamp(mouseY - this.dragAnchor.y, 0, cropArea.clientHeight - this.region.height);
+    // Clamp against the displayed image, not the container.
+    this.region.x = clamp(mouseX - this.dragAnchor.x, 0, this.displayedImageWidth - this.region.width);
+    this.region.y = clamp(mouseY - this.dragAnchor.y, 0, this.displayedImageHeight - this.region.height);
 
     this.draw();
     this.adjustZoomDuringInteraction();
@@ -849,12 +828,12 @@ class TransformManager implements EditToolManager {
     switch (this.resizeSide) {
       case ResizeBoundary.Left: {
         const { newWidth: w, newHeight: h } = this.keepAspectRatio(desiredWidth, height);
-        const finalWidth = clamp(w, minSize, canvas.clientWidth);
+        const finalWidth = clamp(w, minSize, this.displayedImageWidth);
         newRegion = {
           x: Math.max(0, x + width - finalWidth),
           y,
           width: finalWidth,
-          height: clamp(h, minSize, canvas.clientHeight),
+          height: clamp(h, minSize, this.displayedImageHeight),
         };
         break;
       }
@@ -862,8 +841,8 @@ class TransformManager implements EditToolManager {
         const { newWidth: w, newHeight: h } = this.keepAspectRatio(desiredWidth, height);
         newRegion = {
           ...newRegion,
-          width: clamp(w, minSize, canvas.clientWidth - x),
-          height: clamp(h, minSize, canvas.clientHeight),
+          width: clamp(w, minSize, this.displayedImageWidth - x),
+          height: clamp(h, minSize, this.displayedImageHeight),
         };
         break;
       }
@@ -872,8 +851,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          canvas.clientWidth,
-          canvas.clientHeight,
+          this.displayedImageWidth,
+          this.displayedImageHeight,
           minSize,
         );
         newRegion = {
@@ -889,8 +868,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          canvas.clientWidth,
-          canvas.clientHeight - y,
+          this.displayedImageWidth,
+          this.displayedImageHeight - y,
           minSize,
         );
         newRegion = {
@@ -905,8 +884,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          canvas.clientWidth,
-          canvas.clientHeight,
+          this.displayedImageWidth,
+          this.displayedImageHeight,
           minSize,
         );
         newRegion = {
@@ -922,7 +901,7 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          canvas.clientWidth - x,
+          this.displayedImageWidth - x,
           y + height,
           minSize,
         );
@@ -939,8 +918,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          canvas.clientWidth,
-          canvas.clientHeight - y,
+          this.displayedImageWidth,
+          this.displayedImageHeight - y,
           minSize,
         );
         newRegion = {
@@ -956,8 +935,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          canvas.clientWidth - x,
-          canvas.clientHeight - y,
+          this.displayedImageWidth - x,
+          this.displayedImageHeight - y,
           minSize,
         );
         newRegion = {
@@ -972,8 +951,8 @@ class TransformManager implements EditToolManager {
     // Constrain the region to canvas bounds
     this.region = {
       ...newRegion,
-      x: Math.max(0, Math.min(newRegion.x, canvas.clientWidth - newRegion.width)),
-      y: Math.max(0, Math.min(newRegion.y, canvas.clientHeight - newRegion.height)),
+      x: Math.max(0, Math.min(newRegion.x, this.displayedImageWidth - newRegion.width)),
+      y: Math.max(0, Math.min(newRegion.y, this.displayedImageHeight - newRegion.height)),
     };
 
     this.draw();
