@@ -1,7 +1,8 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
+  import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { getAssetMediaUrl } from '$lib/utils';
-  import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
+  import { AssetEditAction, AssetMediaSize, type AssetResponseDto, type CropParameters } from '@immich/sdk';
 
   interface Props {
     asset: AssetResponseDto;
@@ -15,6 +16,31 @@
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
   );
   let params = $derived(adjustManager.svgFilterParams);
+
+  // Display the saved/in-session crop region as an object-view-box on the
+  // <img> so adjust mode shows the cropped version of the photo, not the
+  // uncropped full preview. Without this the user sees the whole image
+  // with their crop effectively hidden — confusing because the main viewer
+  // (and the saved result) do show the cropped version.
+  let cropViewBox = $derived.by(() => {
+    const cropEdit = transformManager.edits.find((e) => e.action === AssetEditAction.Crop);
+    if (!cropEdit) {
+      return 'none';
+    }
+    const p = cropEdit.parameters as CropParameters;
+    const oW = transformManager.originalImageSize.width;
+    const oH = transformManager.originalImageSize.height;
+    if (!oW || !oH || !p.width || !p.height) {
+      return 'none';
+    }
+    const top = (p.y / oH) * 100;
+    const left = (p.x / oW) * 100;
+    const right = ((oW - p.x - p.width) / oW) * 100;
+    const bottom = ((oH - p.y - p.height) / oH) * 100;
+    // Clamp tiny negatives that come from rounding so the browser accepts the value.
+    const clamp = (n: number) => Math.max(0, Math.min(100, n));
+    return `inset(${clamp(top)}% ${clamp(right)}% ${clamp(bottom)}% ${clamp(left)}%)`;
+  });
 
   // Saturation matrix for feColorMatrix
   // Same luminance weights as the server-side implementation
@@ -68,7 +94,7 @@
     src={imageUrl}
     alt="Adjust preview"
     class="max-h-full max-w-full object-contain"
-    style="filter: url(#adjust-filter)"
+    style="filter: url(#adjust-filter); object-view-box: {cropViewBox};"
     draggable="false"
   />
 </div>
