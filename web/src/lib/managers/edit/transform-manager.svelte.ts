@@ -550,40 +550,53 @@ class TransformManager implements EditToolManager {
     }
     this.cropImageScale = scale;
 
-    img.style.width = `${img.width * scale}px`;
-    img.style.height = `${img.height * scale}px`;
+    this.applyImageSize(scale);
 
     this.draw();
   }
 
+  /**
+   * Apply the contain-fit pixel dimensions to the visible DOM <img>.
+   * Setting these inline overrides the CSS `height: 100%` / `max-width: 100%`
+   * combination that would otherwise let the rendered image overflow the
+   * viewport when the image and viewport aspect ratios differ.
+   */
+  private applyImageSize(scale: number) {
+    const img = this.imgElement;
+    const domImg = this.domImgEl;
+    if (!img || !domImg) {
+      return;
+    }
+    const w = `${img.width * scale}px`;
+    const h = `${img.height * scale}px`;
+    domImg.style.width = w;
+    domImg.style.height = h;
+    // Also mirror the size onto the detached element; various transformers
+    // read back img.style after we set scale, and keeping the two in sync
+    // avoids surprises.
+    img.style.width = w;
+    img.style.height = h;
+  }
+
   calculateScale(): number {
     const img = this.imgElement;
-    if (!img || img.width === 0) {
+    if (!img || img.width === 0 || img.height === 0) {
       return 1;
     }
 
-    // Prefer the actual rendered width of the DOM <img>. CSS controls how
-    // the image fits its parent; reading clientWidth gives us whatever
-    // scale the browser ended up picking, which stays correct when the
-    // window resizes. The cropArea.clientWidth path below is a fallback
-    // for the first pre-mount tick before domImgEl is bound.
-    const domImg = this.domImgEl;
-    if (domImg && domImg.clientWidth > 0) {
-      return domImg.clientWidth / img.width;
-    }
-
-    const cropArea = this.cropAreaEl;
-    if (!cropArea) {
+    // Size the image to "contain" within the crop viewport (the parent of
+    // cropAreaEl). The viewport is the real box that flexes with the
+    // window — cropArea itself has `width: max-content` which can get
+    // stuck at the image's intrinsic width, and the image's CSS mixes
+    // `height: 100%` with `max-width: 100%` which lets the rendered
+    // width overflow when the aspect ratio doesn't match. Compute the
+    // fit here and apply it as explicit pixel dimensions in draw().
+    const viewport = this.cropAreaEl?.parentElement;
+    if (!viewport || viewport.clientWidth <= 0 || viewport.clientHeight <= 0) {
       return 1;
     }
 
-    // Fit image to container while maintaining aspect ratio
-    let scale = cropArea.clientWidth / img.width;
-    if (img.height * scale > cropArea.clientHeight) {
-      scale = cropArea.clientHeight / img.height;
-    }
-
-    return scale;
+    return Math.min(viewport.clientWidth / img.width, viewport.clientHeight / img.height);
   }
 
   normalizeCropArea(scale: number) {
@@ -619,8 +632,7 @@ class TransformManager implements EditToolManager {
     this.region = this.normalizeCropArea(scale);
     this.cropImageScale = scale;
 
-    img.style.width = `${img.width * scale}px`;
-    img.style.height = `${img.height * scale}px`;
+    this.applyImageSize(scale);
 
     this.draw();
   }

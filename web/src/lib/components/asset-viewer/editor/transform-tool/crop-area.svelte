@@ -99,17 +99,15 @@
       return;
     }
 
-    // Observe both the outer container (catches window resize) and the
-    // <img> itself (catches cases where CSS changes the image's rendered
-    // size without changing the container — e.g. `width: max-content` on
-    // the parent pinning it while the image still flexes via height: 100%).
+    // Observe the outer container; the crop viewport is a flex child of
+    // it and resizes with it. We don't observe the <img> itself because
+    // JS now drives its rendered size (applyImageSize sets explicit
+    // pixel dims on resize), and observing it would create a feedback
+    // loop: style change → observer fires → recompute → style change.
     const resizeObserver = new ResizeObserver(() => {
       transformManager.resizeCanvas();
     });
     resizeObserver.observe(canvasContainer);
-    if (transformManager.domImgEl) {
-      resizeObserver.observe(transformManager.domImgEl);
-    }
 
     return () => {
       resizeObserver.disconnect();
@@ -355,11 +353,12 @@
 
   .crop-area img {
     display: block;
-    max-width: 100%;
-    height: 100%;
     user-select: none;
     transition: transform 0.15s ease;
     transform-origin: center center;
+    /* Explicit width/height are set by transformManager.applyImageSize()
+       via inline style — we deliberately don't constrain here so the JS
+       values are authoritative and the image always fits the viewport. */
   }
 
   .crop-frame {
