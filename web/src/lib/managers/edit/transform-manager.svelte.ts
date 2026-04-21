@@ -664,7 +664,16 @@ class TransformManager implements EditToolManager {
       return 1;
     }
 
-    return Math.min(viewport.clientWidth / img.width, viewport.clientHeight / img.height);
+    // For 90° / 270° rotations applied via CSS transform on cropArea, the
+    // rendered content's bounding box is the *swapped* (h × w) of the
+    // layout box. We must compute scale against the rotated bounds so the
+    // rotated image still fits the viewport — otherwise a rotated portrait
+    // extends beyond the viewport horizontally and gets clipped.
+    const rotated = this.orientationChanged;
+    const effW = rotated ? img.height : img.width;
+    const effH = rotated ? img.width : img.height;
+
+    return Math.min(viewport.clientWidth / effW, viewport.clientHeight / effH);
   }
 
   normalizeCropArea(scale: number) {
