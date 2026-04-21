@@ -237,11 +237,24 @@ class TransformManager implements EditToolManager {
       size: AssetMediaSize.Preview,
     });
 
-    this.imgElement.src = imageURL;
+    // Attach listeners BEFORE setting src. When the preview is already in the
+    // browser cache (e.g. the user is re-entering the editor on the same
+    // asset), the `load` event can fire synchronously or in a microtask
+    // immediately after src assignment; if the listener isn't attached yet
+    // we miss it entirely and onImageLoad never runs, leaving the manager
+    // at its reset defaults (region={0,0,100,100}, size=1000×1000). A
+    // subsequent save then serializes those defaults as a real 100×100
+    // top-left crop on the original image.
     this.imgElement.addEventListener('load', () => transformManager.onImageLoad(edits), { passive: true });
     this.imgElement.addEventListener('error', (error) => handleError(error, 'ErrorLoadingImage'), {
       passive: true,
     });
+    this.imgElement.src = imageURL;
+    // Belt-and-suspenders: if the image was already fully cached by the time
+    // the listener got attached, fire the callback ourselves.
+    if (this.imgElement.complete && this.imgElement.naturalWidth > 0) {
+      transformManager.onImageLoad(edits);
+    }
 
     globalThis.addEventListener('mousemove', (e: MouseEvent) => transformManager.handleMouseMove(e), { passive: true });
 
