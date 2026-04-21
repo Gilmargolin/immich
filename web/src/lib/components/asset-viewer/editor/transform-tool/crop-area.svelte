@@ -99,6 +99,13 @@
       return;
     }
 
+    // When CropArea mounts (which only happens in crop mode), rehydrate
+    // the transform state from the stored edits. This covers the case
+    // where the editor opened in adjust mode first — onImageLoad fired
+    // before cropAreaEl was bound and bailed, so state is still at
+    // reset defaults until we re-run it here.
+    transformManager.rehydrateIfReady();
+
     // Observe the outer container; the crop viewport is a flex child of
     // it and resizes with it. We don't observe the <img> itself because
     // JS now drives its rendered size (applyImageSize sets explicit

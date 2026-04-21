@@ -87,6 +87,18 @@ class TransformManager implements EditToolManager {
   displayedImageWidth = $derived(this.cropImageSize.width * this.cropImageScale);
   displayedImageHeight = $derived(this.cropImageSize.height * this.cropImageScale);
 
+  // Snapshot of the edits passed into onActivate. Used as a pass-through
+  // for getEdits() when the crop tool was never visibly loaded (CropArea
+  // only mounts in crop mode; an editor opened directly in adjust mode
+  // never populates cropAreaEl, so onImageLoad bails and our state stays
+  // at reset defaults — without this pass-through a subsequent save would
+  // serialize a tiny default-state crop over the real stored crop).
+  initialEdits: EditActions = [];
+  // True once onImageLoad has successfully set state from a loaded image
+  // and a bound cropAreaEl. Stays false if the tool was never opened in
+  // crop mode during this editor session.
+  isImageLoaded = $state(false);
+
   // CSS zoom applied after crop resize so the crop fills the editing area
   cropZoom = $state(1);
   // Frozen region used for zoom centering during drag — prevents coordinate drift
@@ -147,6 +159,20 @@ class TransformManager implements EditToolManager {
   }
 
   getEdits(): EditActions {
+    // If the crop tool never loaded this session (e.g. editor opened in
+    // adjust mode and the user saved without switching to crop mode),
+    // our state is still at reset defaults — don't synthesize a crop
+    // from them. Pass through the transform-related edits the tool was
+    // initialized with so they're preserved across the save.
+    if (!this.isImageLoaded) {
+      return this.initialEdits.filter(
+        (e) =>
+          e.action === AssetEditAction.Crop ||
+          e.action === AssetEditAction.Mirror ||
+          e.action === AssetEditAction.Rotate,
+      );
+    }
+
     const edits: EditActions = [];
 
     if (this.checkCropEdits()) {
@@ -228,6 +254,11 @@ class TransformManager implements EditToolManager {
     const originalSize = getDimensions(asset.exifInfo!);
     this.originalImageSize = { width: originalSize.width ?? 0, height: originalSize.height ?? 0 };
 
+    // Remember the edits we were opened with so getEdits() can pass them
+    // through if the crop tool never gets mounted (adjust-only save path).
+    this.initialEdits = edits;
+    this.isImageLoaded = false;
+
     this.imgElement = new Image();
 
     const imageURL = getAssetMediaUrl({
@@ -304,6 +335,8 @@ class TransformManager implements EditToolManager {
     this.originalImageSize = { width: 1000, height: 1000 };
     this.cropImageScale = 1;
     this.cropAspectRatio = 'free';
+    this.initialEdits = [];
+    this.isImageLoaded = false;
 
     this.hasChanges = false;
   }
@@ -566,6 +599,28 @@ class TransformManager implements EditToolManager {
     this.applyImageSize(scale);
 
     this.draw();
+
+    this.isImageLoaded = true;
+  }
+
+  /**
+   * Called from CropArea when it mounts. If the preview image is already
+   * loaded but onImageLoad bailed earlier (because cropAreaEl wasn't bound
+   * yet — the component only mounts in crop mode), run onImageLoad now
+   * with the original edits so the transform state matches what was saved.
+   */
+  rehydrateIfReady() {
+    if (this.isImageLoaded) {
+      return;
+    }
+    const img = this.imgElement;
+    if (!img || !img.complete || img.naturalWidth === 0) {
+      return;
+    }
+    if (!this.cropAreaEl) {
+      return;
+    }
+    this.onImageLoad(this.initialEdits);
   }
 
   /**
