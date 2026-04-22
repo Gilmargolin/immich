@@ -18,17 +18,30 @@ export const getOutputDimensions = (
   for (const edit of edits) {
     if (edit.action === AssetEditAction.Rotate) {
       const totalAngle = ((edit.parameters.angle % 360) + 360) % 360;
-      const quadrant = Math.floor(totalAngle / 90);
-      const freeAngle = totalAngle - quadrant * 90;
+      // Split into axis-aligned (nearest 90°) and free-rotation parts,
+      // matching applyEdits in media.repository.ts exactly. Using
+      // Math.floor here would mis-classify small negative rotations:
+      // e.g. -5° normalizes to 355°, floor/90 = 3 (→ 270° swap + 85°
+      // free-rotation) while the actual pipeline does a 360° (= no
+      // swap) + -5° free rotation. That made asset.width/height nearly
+      // square for any small negative rotation, so the viewer reserved
+      // the wrong aspect box and stretched the edited preview.
+      const angle90 = Math.round(totalAngle / 90) * 90;
+      const quadrant = (angle90 / 90) % 4;
+      const freeAngle = totalAngle - angle90;
 
-      // Apply 90° component (swaps dimensions)
+      // Apply 90° component (swaps dimensions if odd quadrants)
       if (quadrant % 2 !== 0) {
         [width, height] = [height, width];
       }
 
       // Apply free rotation component → inscribed rectangle
-      if (freeAngle > 0.01) {
-        const theta = (freeAngle * Math.PI) / 180;
+      if (Math.abs(freeAngle) > 0.01) {
+        // Use |freeAngle| — inscribed dims are symmetric in rotation
+        // direction, and applyEdits also uses Math.abs(freeAngle) when
+        // extracting. Without the abs, a negative angle would flip
+        // sinT's sign and produce an iW larger than the original width.
+        const theta = Math.abs(freeAngle) * (Math.PI / 180);
         const cosT = Math.cos(theta);
         const sinT = Math.sin(theta);
         const cos2T = Math.cos(2 * theta);
