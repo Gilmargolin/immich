@@ -47,13 +47,40 @@
     }
   });
 
+  /**
+   * Scale factor so that, when rotated by θ, the image's rotated quad
+   * fully covers the crop frame (the axis-aligned W×H box at the image's
+   * layout size). Standard cover-after-rotation math; the max of the two
+   * corner constraints is the binding one.
+   *
+   *   scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
+   *
+   * This is the original Immich behavior — image grows slightly on
+   * rotation, frame stays at its user-drawn size, and the .crop-area's
+   * `overflow: hidden` (+ `contain: paint`) clips the extension so nothing
+   * bleeds outside the image box even for portrait photos in a wide viewport.
+   */
+  let imageScale = $derived.by(() => {
+    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
+    if (theta === 0) return 1;
+    const img = transformManager.imgElement;
+    if (!img || img.width === 0 || img.height === 0) return 1;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    return Math.max(cosT + (img.height / img.width) * sinT, (img.width / img.height) * sinT + cosT);
+  });
+
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
-    // Rotate in place, no scale. The crop frame itself auto-shrinks to
-    // the inscribed rect (handled by transformManager.draw()), which is
-    // exactly what the server saves — so there's no visible zoom and no
-    // black corners inside the frame.
+    // Scale FIRST so the rotated image still covers the frame — this is
+    // how the original (working) implementation did it. With `scale(X) rotate(Y)`
+    // CSS applies rotate first then scale, which is the order we want
+    // (rotate the image around center, then scale it up just enough to
+    // cover its original W×H box).
+    if (imageScale !== 1) {
+      transforms.push(`scale(${imageScale})`);
+    }
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
     }
@@ -66,14 +93,6 @@
     }
 
     return transforms.join(' ');
-  });
-
-  // Re-draw the crop frame + overlay when free rotation changes so the
-  // visible frame tracks the inscribed rect (transformManager.draw() reads
-  // freeRotation and emits the correct inscribed coords).
-  $effect(() => {
-    const _rot = transformManager.freeRotation;
-    transformManager.draw();
   });
 
   $effect(() => {
