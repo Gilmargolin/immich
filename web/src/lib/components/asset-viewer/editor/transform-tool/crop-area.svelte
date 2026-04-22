@@ -47,18 +47,39 @@
     }
   });
 
+  /**
+   * Calculate the scale factor needed so the rotated image fully covers the crop frame.
+   * Given image W×H rotated by θ, the crop frame (W×H) must be fully inscribed.
+   * Scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
+   */
+  let imageScale = $derived.by(() => {
+    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
+    if (theta === 0) return 1;
+
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    const img = transformManager.imgElement;
+    if (!img || img.width === 0 || img.height === 0) return 1;
+
+    const W = img.width;
+    const H = img.height;
+
+    // Two constraints from the 4 corners of the crop frame fitting inside the rotated image
+    const s1 = cosT + (H / W) * sinT;
+    const s2 = (W / H) * sinT + cosT;
+
+    return Math.max(s1, s2);
+  });
+
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
-    // Free rotation applied to the image only (frame stays static).
-    // Intentionally no scale(): the previous implementation scaled the
-    // image up by ~2.6% at 1° to avoid black corners appearing inside
-    // the crop frame, which made the image visibly zoom out of the
-    // frame on every small rotation. The server already applies an
-    // inscribed-rectangle crop after rotation, so the black corners
-    // never make it into the saved output. A tiny bit of transparent
-    // wedge may show in the editor near the corners on non-zero
-    // rotations — that's visual feedback, not part of the save.
+    // Scale up so rotated image fully covers the crop frame
+    if (imageScale !== 1) {
+      transforms.push(`scale(${imageScale})`);
+    }
+
+    // Free rotation applied to the image only (frame stays static)
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
     }
