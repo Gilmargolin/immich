@@ -292,16 +292,18 @@
 
   .crop-area {
     position: relative;
-    display: inline-block;
+    display: block;
     outline: none;
     max-height: 100%;
     max-width: 100%;
-    width: max-content;
-    /* Clip the small rotation extension at the image's layout box so the
-       photo doesn't bleed past its own rectangle when the dial is moved.
-       The crop frame shrinks to the inscribed rect inside, so the visible
-       footprint matches the saved output. */
+    /* Explicit width and height are set by transformManager.applyImageSize()
+       to match the displayed image exactly. We don't use `width: max-content`
+       any more because it doesn't always lock the element's layout against
+       transformed children — the rotation extension could bleed past
+       overflow:hidden. `contain: paint` forces the clipping context to be
+       the element's box, independent of child transforms. */
     overflow: hidden;
+    contain: paint;
   }
   .crop-area.changedOriention {
     max-width: 92vh;

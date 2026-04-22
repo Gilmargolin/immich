@@ -688,6 +688,15 @@ class TransformManager implements EditToolManager {
     // avoids surprises.
     img.style.width = w;
     img.style.height = h;
+    // Size cropArea explicitly to the image box. Avoids relying on CSS
+    // `width: max-content`, which in some browsers doesn't lock the
+    // element's size against transformed children, allowing rotation
+    // content to bleed past `overflow: hidden`. Explicit dims make the
+    // clipping context deterministic.
+    if (this.cropAreaEl) {
+      this.cropAreaEl.style.width = w;
+      this.cropAreaEl.style.height = h;
+    }
   }
 
   calculateScale(): number {
