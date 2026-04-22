@@ -47,39 +47,15 @@
     }
   });
 
-  /**
-   * Scale the image up just enough that its rotated bounding box still
-   * covers the W×H layout box it occupies. Without this, rotating a
-   * rectangle exposes transparent triangular corners inside the crop
-   * frame. The .crop-area above has overflow:hidden, so the small
-   * extension beyond the layout box that this scale implies is clipped
-   * — the image appears to rotate *inside* the frame, which is the
-   * Lightroom-style behavior.
-   *
-   * scale = max(cosθ + (H/W)·sinθ,  (W/H)·sinθ + cosθ)
-   */
-  let imageScale = $derived.by(() => {
-    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
-    if (theta === 0) return 1;
-    const img = transformManager.imgElement;
-    if (!img || img.width === 0 || img.height === 0) return 1;
-    const cosT = Math.cos(theta);
-    const sinT = Math.sin(theta);
-    const W = img.width;
-    const H = img.height;
-    return Math.max(cosT + (H / W) * sinT, (W / H) * sinT + cosT);
-  });
-
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
-    // Free rotation applied to the image only (frame stays static).
+    // Rotate the image only. No scale — the crop frame instead shrinks to
+    // the inscribed rect (see draw() in transform-manager), which matches
+    // what the server saves (rotate → inscribe) and avoids any visible
+    // zoom of the image content. Portrait and landscape behave identically.
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
-    }
-
-    if (imageScale !== 1) {
-      transforms.push(`scale(${imageScale})`);
     }
 
     if (transformManager.mirrorHorizontal) {
