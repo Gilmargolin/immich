@@ -803,6 +803,18 @@ class TransformManager implements EditToolManager {
     const cropArea = this.cropAreaEl;
     if (!cropArea) return;
 
+    // Free rotation already applies a scale() on the <img> so the rotated
+    // quad covers the crop frame. Compounding with the cropArea zoom-to-fill
+    // here reads as a big unwanted zoom whenever the user nudges the frame
+    // after rotating. Skip the auto-zoom when a free rotation is active —
+    // the cropZoom stays at 1, the rotation's own imageScale handles the
+    // visual fit, and the user can still move the frame around normally.
+    if (this.freeRotation !== 0) {
+      this.cropZoom = 1;
+      this.draw();
+      return;
+    }
+
     // Parent is the crop-viewport which excludes the dial
     const viewport = cropArea.parentElement;
     if (!viewport) return;
