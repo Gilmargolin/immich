@@ -34,8 +34,15 @@ export const getOutputDimensions = (
         const cos2T = Math.cos(2 * theta);
 
         if (Math.abs(cos2T) > 0.001 && width * cosT > height * sinT && height * cosT > width * sinT) {
-          width = Math.round((width * cosT - height * sinT) / cos2T);
-          height = Math.round((height * cosT - width * sinT) / cos2T);
+          // Compute both inscribed dims from the ORIGINAL width/height.
+          // Previously the height formula was reading the already-reassigned
+          // `width`, which made the stored asset dimensions diverge from the
+          // server's actual inscribed extract — so the viewer reserved the
+          // wrong aspect ratio after saving a rotated crop.
+          const newWidth = Math.round((width * cosT - height * sinT) / cos2T);
+          const newHeight = Math.round((height * cosT - width * sinT) / cos2T);
+          width = newWidth;
+          height = newHeight;
         } else {
           const minDim = Math.min(width, height);
           width = Math.round(minDim / (cosT + sinT));
