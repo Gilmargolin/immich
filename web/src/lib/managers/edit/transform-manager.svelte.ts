@@ -507,15 +507,59 @@ class TransformManager implements EditToolManager {
     return { newWidth: w, newHeight: h };
   }
 
+  /**
+   * Largest axis-aligned rectangle inscribed inside `region` after rotating
+   * it by `angleDeg` around its own center. Mirrors the server-side
+   * inscribed-rect formula (see applyEdits in media.repository.ts).
+   */
+  private inscribedRegion(region: Region, angleDeg: number): Region {
+    const theta = Math.abs((angleDeg * Math.PI) / 180);
+    if (theta === 0) return region;
+
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    const cos2T = Math.cos(2 * theta);
+    const W = region.width;
+    const H = region.height;
+
+    let iW: number;
+    let iH: number;
+    if (Math.abs(cos2T) > 0.001) {
+      iW = Math.max(1, (W * cosT - H * sinT) / cos2T);
+      iH = Math.max(1, (H * cosT - W * sinT) / cos2T);
+    } else {
+      // Near 45°
+      const minDim = Math.min(W, H);
+      iW = minDim / (cosT + sinT);
+      iH = iW;
+    }
+    iW = Math.min(iW, W);
+    iH = Math.min(iH, H);
+
+    const cx = region.x + W / 2;
+    const cy = region.y + H / 2;
+    return {
+      x: cx - iW / 2,
+      y: cy - iH / 2,
+      width: iW,
+      height: iH,
+    };
+  }
+
   draw(crop: Region = this.region) {
     if (!this.cropFrame) {
       return;
     }
 
-    this.cropFrame.style.left = `${crop.x}px`;
-    this.cropFrame.style.top = `${crop.y}px`;
-    this.cropFrame.style.width = `${crop.width}px`;
-    this.cropFrame.style.height = `${crop.height}px`;
+    // When free rotation is active, display the inscribed axis-aligned rect
+    // that the server will actually save (rotate → inscribed extract).
+    // No image scale-up needed → no visible zoom on the image itself.
+    const displayCrop = this.freeRotation !== 0 ? this.inscribedRegion(crop, this.freeRotation) : crop;
+
+    this.cropFrame.style.left = `${displayCrop.x}px`;
+    this.cropFrame.style.top = `${displayCrop.y}px`;
+    this.cropFrame.style.width = `${displayCrop.width}px`;
+    this.cropFrame.style.height = `${displayCrop.height}px`;
 
     if (!this.overlayEl) {
       return;
@@ -528,11 +572,11 @@ class TransformManager implements EditToolManager {
       100% 100%,
       100% 0%,
       0% 0%,
-      ${crop.x}px ${crop.y}px,
-      ${crop.x + crop.width}px ${crop.y}px,
-      ${crop.x + crop.width}px ${crop.y + crop.height}px,
-      ${crop.x}px ${crop.y + crop.height}px,
-      ${crop.x}px ${crop.y}px
+      ${displayCrop.x}px ${displayCrop.y}px,
+      ${displayCrop.x + displayCrop.width}px ${displayCrop.y}px,
+      ${displayCrop.x + displayCrop.width}px ${displayCrop.y + displayCrop.height}px,
+      ${displayCrop.x}px ${displayCrop.y + displayCrop.height}px,
+      ${displayCrop.x}px ${displayCrop.y}px
     )
   `;
   }

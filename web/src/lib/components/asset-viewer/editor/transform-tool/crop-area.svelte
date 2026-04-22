@@ -47,39 +47,13 @@
     }
   });
 
-  /**
-   * Calculate the scale factor needed so the rotated image fully covers the crop frame.
-   * Given image W×H rotated by θ, the crop frame (W×H) must be fully inscribed.
-   * Scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
-   */
-  let imageScale = $derived.by(() => {
-    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
-    if (theta === 0) return 1;
-
-    const cosT = Math.cos(theta);
-    const sinT = Math.sin(theta);
-    const img = transformManager.imgElement;
-    if (!img || img.width === 0 || img.height === 0) return 1;
-
-    const W = img.width;
-    const H = img.height;
-
-    // Two constraints from the 4 corners of the crop frame fitting inside the rotated image
-    const s1 = cosT + (H / W) * sinT;
-    const s2 = (W / H) * sinT + cosT;
-
-    return Math.max(s1, s2);
-  });
-
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
-    // Scale up so rotated image fully covers the crop frame
-    if (imageScale !== 1) {
-      transforms.push(`scale(${imageScale})`);
-    }
-
-    // Free rotation applied to the image only (frame stays static)
+    // Rotate in place, no scale. The crop frame itself auto-shrinks to
+    // the inscribed rect (handled by transformManager.draw()), which is
+    // exactly what the server saves — so there's no visible zoom and no
+    // black corners inside the frame.
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
     }
@@ -92,6 +66,14 @@
     }
 
     return transforms.join(' ');
+  });
+
+  // Re-draw the crop frame + overlay when free rotation changes so the
+  // visible frame tracks the inscribed rect (transformManager.draw() reads
+  // freeRotation and emits the correct inscribed coords).
+  $effect(() => {
+    const _rot = transformManager.freeRotation;
+    transformManager.draw();
   });
 
   $effect(() => {
@@ -315,7 +297,11 @@
     max-height: 100%;
     max-width: 100%;
     width: max-content;
-    /* No overflow:hidden — the rotated/scaled image should be visible beyond the frame */
+    /* Clip the small rotation extension at the image's layout box so the
+       photo doesn't bleed past its own rectangle when the dial is moved.
+       The crop frame shrinks to the inscribed rect inside, so the visible
+       footprint matches the saved output. */
+    overflow: hidden;
   }
   .crop-area.changedOriention {
     max-width: 92vh;
