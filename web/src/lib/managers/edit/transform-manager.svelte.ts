@@ -507,61 +507,15 @@ class TransformManager implements EditToolManager {
     return { newWidth: w, newHeight: h };
   }
 
-  /**
-   * Largest axis-aligned rectangle inscribed inside `region` after
-   * rotating it by `angleDeg` around its own center. Mirrors the
-   * server-side inscribed-rect formula (media.repository.ts applyEdits).
-   */
-  private inscribedRegion(region: Region, angleDeg: number): Region {
-    const theta = Math.abs((angleDeg * Math.PI) / 180);
-    if (theta === 0) return region;
-
-    const cosT = Math.cos(theta);
-    const sinT = Math.sin(theta);
-    const cos2T = Math.cos(2 * theta);
-    const W = region.width;
-    const H = region.height;
-
-    let iW: number;
-    let iH: number;
-    if (Math.abs(cos2T) > 0.001) {
-      iW = Math.max(1, (W * cosT - H * sinT) / cos2T);
-      iH = Math.max(1, (H * cosT - W * sinT) / cos2T);
-    } else {
-      // Near 45°
-      const minDim = Math.min(W, H);
-      iW = minDim / (cosT + sinT);
-      iH = iW;
-    }
-    iW = Math.min(iW, W);
-    iH = Math.min(iH, H);
-
-    const cx = region.x + W / 2;
-    const cy = region.y + H / 2;
-    return {
-      x: cx - iW / 2,
-      y: cy - iH / 2,
-      width: iW,
-      height: iH,
-    };
-  }
-
   draw(crop: Region = this.region) {
     if (!this.cropFrame) {
       return;
     }
 
-    // When free rotation is active, display the inscribed axis-aligned
-    // rect that the server will save — not the user's drawn region. Keeps
-    // the crop frame matching the actual save output, and means we don't
-    // need to scale the image up to hide black corners (no visible zoom).
-    const displayCrop = this.freeRotation !== 0 ? this.inscribedRegion(crop, this.freeRotation) : crop;
-
-    this.cropFrame.style.left = `${displayCrop.x}px`;
-    this.cropFrame.style.top = `${displayCrop.y}px`;
-    this.cropFrame.style.width = `${displayCrop.width}px`;
-    this.cropFrame.style.height = `${displayCrop.height}px`;
-    crop = displayCrop;
+    this.cropFrame.style.left = `${crop.x}px`;
+    this.cropFrame.style.top = `${crop.y}px`;
+    this.cropFrame.style.width = `${crop.width}px`;
+    this.cropFrame.style.height = `${crop.height}px`;
 
     if (!this.overlayEl) {
       return;
