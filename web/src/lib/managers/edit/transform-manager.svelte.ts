@@ -644,6 +644,19 @@ class TransformManager implements EditToolManager {
     // avoids surprises.
     img.style.width = w;
     img.style.height = h;
+    // eslint-disable-next-line no-console
+    console.info('[rotate-debug] applyImageSize', {
+      scale,
+      cropZoom: this.cropZoom,
+      freeRotation: this.freeRotation,
+      imageRotation: this.imageRotation,
+      imgNaturalW: img.width,
+      imgNaturalH: img.height,
+      styleW: w,
+      styleH: h,
+      regionW: this.region.width,
+      regionH: this.region.height,
+    });
   }
 
   calculateScale(): number {
