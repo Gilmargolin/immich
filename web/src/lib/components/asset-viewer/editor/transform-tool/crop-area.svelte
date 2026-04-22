@@ -294,7 +294,13 @@
     max-height: 100%;
     max-width: 100%;
     width: max-content;
-    /* No overflow:hidden — the rotated/scaled image should be visible beyond the frame */
+    /* Clip any rotated content that would otherwise extend past the image's
+       layout box. Previously we let it overflow so the dimmed "outside
+       crop" area could show more of the source image, but that combined
+       with the free-rotation dial produced a visible zoom-out effect
+       because the rotated bounding box grows. Clipping keeps the image's
+       visible footprint exactly equal to its layout size at all angles. */
+    overflow: hidden;
   }
   .crop-area.changedOriention {
     max-width: 92vh;
