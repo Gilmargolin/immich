@@ -47,39 +47,20 @@
     }
   });
 
-  /**
-   * Scale the image up just enough that its rotated bounding box still
-   * covers the W×H layout box it occupies. Without this, rotating a
-   * rectangle exposes transparent triangular corners inside the crop
-   * frame. The .crop-area above has overflow:hidden, so the small
-   * extension beyond the layout box that this scale implies is clipped
-   * — the image appears to rotate *inside* the frame, which is the
-   * Lightroom-style behavior.
-   *
-   * scale = max(cosθ + (H/W)·sinθ,  (W/H)·sinθ + cosθ)
-   */
-  let imageScale = $derived.by(() => {
-    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
-    if (theta === 0) return 1;
-    const img = transformManager.imgElement;
-    if (!img || img.width === 0 || img.height === 0) return 1;
-    const cosT = Math.cos(theta);
-    const sinT = Math.sin(theta);
-    const W = img.width;
-    const H = img.height;
-    return Math.max(cosT + (H / W) * sinT, (W / H) * sinT + cosT);
-  });
-
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
     // Free rotation applied to the image only (frame stays static).
+    // Intentionally no scale(): the previous implementation scaled the
+    // image up by ~2.6% at 1° to avoid black corners appearing inside
+    // the crop frame, which made the image visibly zoom out of the
+    // frame on every small rotation. The server already applies an
+    // inscribed-rectangle crop after rotation, so the black corners
+    // never make it into the saved output. A tiny bit of transparent
+    // wedge may show in the editor near the corners on non-zero
+    // rotations — that's visual feedback, not part of the save.
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
-    }
-
-    if (imageScale !== 1) {
-      transforms.push(`scale(${imageScale})`);
     }
 
     if (transformManager.mirrorHorizontal) {
