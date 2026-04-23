@@ -92,7 +92,16 @@
       transforms.push('scaleY(-1)');
     }
 
-    return transforms.join(' ');
+    const result = transforms.join(' ');
+    // eslint-disable-next-line no-console
+    console.info('[rotate-drag-debug] imageTransform', {
+      freeRotation: transformManager.freeRotation,
+      imageScale,
+      imgNaturalW: transformManager.imgElement?.width,
+      imgNaturalH: transformManager.imgElement?.height,
+      applied: result,
+    });
+    return result;
   });
 
 
@@ -136,6 +145,14 @@
     // layering cropZoom's scale() here on cropArea would compound with
     // that and read as a big unwanted zoom after any drag/resize.
     const zoom = transformManager.freeRotation !== 0 ? 1 : transformManager.cropZoom;
+    // eslint-disable-next-line no-console
+    console.info('[rotate-drag-debug] cropAreaStyle', {
+      freeRotation: transformManager.freeRotation,
+      cropZoom: transformManager.cropZoom,
+      effectiveZoom: zoom,
+      isInteracting: transformManager.isInteracting,
+      region: { ...transformManager.region },
+    });
 
     if (zoom <= 1) {
       return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
