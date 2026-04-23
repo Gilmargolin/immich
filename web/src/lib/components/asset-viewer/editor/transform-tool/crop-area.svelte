@@ -95,6 +95,17 @@
     return transforms.join(' ');
   });
 
+  // Hard guard: while any free rotation is active, the rotation itself
+  // carries the cover-scale on the <img>. Layering cropZoom on top of
+  // that compounds into a big zoom. Pin cropZoom to 1 whenever rotation
+  // is non-zero, regardless of which code path tried to bump it
+  // (zoomToFillCrop timer, resize observer, mid-drag state, etc.).
+  $effect(() => {
+    if (transformManager.freeRotation !== 0 && transformManager.cropZoom !== 1) {
+      transformManager.cropZoom = 1;
+    }
+  });
+
   $effect(() => {
     if (!canvasContainer) {
       return;
