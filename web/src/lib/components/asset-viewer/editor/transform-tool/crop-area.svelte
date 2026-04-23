@@ -95,16 +95,6 @@
     return transforms.join(' ');
   });
 
-  // Hard guard: while any free rotation is active, the rotation itself
-  // carries the cover-scale on the <img>. Layering cropZoom on top of
-  // that compounds into a big zoom. Pin cropZoom to 1 whenever rotation
-  // is non-zero, regardless of which code path tried to bump it
-  // (zoomToFillCrop timer, resize observer, mid-drag state, etc.).
-  $effect(() => {
-    if (transformManager.freeRotation !== 0 && transformManager.cropZoom !== 1) {
-      transformManager.cropZoom = 1;
-    }
-  });
 
   $effect(() => {
     if (!canvasContainer) {
@@ -137,10 +127,15 @@
   // During interaction, use frozen anchor region for translate to prevent coordinate drift.
   // Disable transition during interaction so zoom adjustments are instant.
   let cropAreaStyle = $derived.by(() => {
-    const zoom = transformManager.cropZoom;
     const rotation = transformManager.imageRotation;
     const interacting = transformManager.isInteracting;
     const transition = interacting ? 'transition: none;' : 'transition: transform 0.3s ease;';
+
+    // While any free rotation is active, pin the effective zoom to 1.
+    // The rotation's own imageScale on the <img> handles the cover fit;
+    // layering cropZoom's scale() here on cropArea would compound with
+    // that and read as a big unwanted zoom after any drag/resize.
+    const zoom = transformManager.freeRotation !== 0 ? 1 : transformManager.cropZoom;
 
     if (zoom <= 1) {
       return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
