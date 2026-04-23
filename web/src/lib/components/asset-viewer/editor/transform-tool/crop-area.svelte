@@ -48,19 +48,31 @@
   });
 
   /**
-   * Scale factor so that, when rotated by θ, the image's rotated quad
-   * fully covers the crop frame (the axis-aligned W×H box at the image's
-   * layout size). Standard cover-after-rotation math; the max of the two
-   * corner constraints is the binding one.
+   * Cover-scale factor — the Google Photos / Lightroom hybrid.
    *
    *   scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
    *
-   * This is the original Immich behavior — image grows slightly on
-   * rotation, frame stays at its user-drawn size, and the .crop-area's
-   * `overflow: hidden` (+ `contain: paint`) clips the extension so nothing
-   * bleeds outside the image box even for portrait photos in a wide viewport.
+   * At rest (user not touching the dial) the image grows to this factor
+   * so the user-drawn crop frame stays fully covered and no transparent
+   * wedges appear at the frame corners.
+   *
+   * While the user is actively dragging the dial, scale drops to 1 so
+   * they see the *whole* photo at natural size and can make an informed
+   * angle choice. The four transparent wedges that appear under the
+   * dim overlay during drag are tolerated for the duration of the
+   * interaction — they snap back under the cover-scale the instant the
+   * pointer is released, thanks to the existing `transition: transform`
+   * on the <img>.
+   *
+   * This specifically addresses the "image is blown up 2× during crop"
+   * complaint: at 30–45° rotation the cover-scale is 1.6–2×, which
+   * is correct visually but hid too much of the image whenever the
+   * user wanted to choose a crop. With this hybrid they always have a
+   * way to see full context (touch the dial), then release for a clean
+   * preview when they're ready to interact with the frame.
    */
   let imageScale = $derived.by(() => {
+    if (isDraggingDial) return 1;
     const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
     if (theta === 0) return 1;
     const img = transformManager.imgElement;
