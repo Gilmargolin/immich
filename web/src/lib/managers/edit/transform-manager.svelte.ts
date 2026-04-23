@@ -87,6 +87,40 @@ class TransformManager implements EditToolManager {
   displayedImageWidth = $derived(this.cropImageSize.width * this.cropImageScale);
   displayedImageHeight = $derived(this.cropImageSize.height * this.cropImageScale);
 
+  // Inscribed-rectangle bounds for a free rotation. The frame is never
+  // allowed to extend past these bounds — that would put a corner onto
+  // one of the transparent wedges the rotated image leaves at the sides.
+  //
+  // The inscribed formula (iW = (W cosθ − H sinθ)/cos 2θ) is symmetric in
+  // sign of θ and in the aspect ratio, so we feed |freeRotation| and use
+  // the same branch for portrait/landscape. Near 45° we fall back to the
+  // simple W'/(cosθ+sinθ) case for numerical stability.
+  rotationBounds = $derived.by(() => {
+    const W = this.displayedImageWidth;
+    const H = this.displayedImageHeight;
+    if (this.freeRotation === 0) {
+      return { x: 0, y: 0, width: W, height: H };
+    }
+    const theta = Math.abs(this.freeRotation) * (Math.PI / 180);
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    const cos2T = Math.cos(2 * theta);
+    let iW: number;
+    let iH: number;
+    if (Math.abs(cos2T) < 0.001 || W * cosT <= H * sinT || H * cosT <= W * sinT) {
+      iW = iH = Math.min(W, H) / (cosT + sinT);
+    } else {
+      iW = (W * cosT - H * sinT) / cos2T;
+      iH = (H * cosT - W * sinT) / cos2T;
+    }
+    return {
+      x: (W - iW) / 2,
+      y: (H - iH) / 2,
+      width: iW,
+      height: iH,
+    };
+  });
+
   // Snapshot of the edits passed into onActivate. Used as a pass-through
   // for getEdits() when the crop tool was never visibly loaded (CropArea
   // only mounts in crop mode; an editor opened directly in adjust mode
@@ -803,12 +837,11 @@ class TransformManager implements EditToolManager {
     const cropArea = this.cropAreaEl;
     if (!cropArea) return;
 
-    // Free rotation already applies a scale() on the <img> so the rotated
-    // quad covers the crop frame. Compounding with the cropArea zoom-to-fill
-    // here reads as a big unwanted zoom whenever the user nudges the frame
-    // after rotating. Skip the auto-zoom when a free rotation is active —
-    // the cropZoom stays at 1, the rotation's own imageScale handles the
-    // visual fit, and the user can still move the frame around normally.
+    // Skip zoom-to-fill while free rotation is active. Under rotation the
+    // frame is already constrained to the inscribed rectangle (see
+    // clampRegionToRotationBounds), so zooming in on it would visually
+    // magnify the rotated image well past what the user drew — which is
+    // exactly the "image is blown up" behavior the user flagged.
     if (this.freeRotation !== 0) {
       this.cropZoom = 1;
       this.draw();
@@ -894,9 +927,13 @@ class TransformManager implements EditToolManager {
     }
 
     this.hasChanges = true;
-    // Clamp against the displayed image, not the container.
-    this.region.x = clamp(mouseX - this.dragAnchor.x, 0, this.displayedImageWidth - this.region.width);
-    this.region.y = clamp(mouseY - this.dragAnchor.y, 0, this.displayedImageHeight - this.region.height);
+    // Clamp against the rotation-aware bounds. When there's no free
+    // rotation this is just the displayed image rectangle; under rotation
+    // it's the inscribed rectangle, which keeps the frame off the
+    // transparent wedges at the rotated image's corners.
+    const b = this.rotationBounds;
+    this.region.x = clamp(mouseX - this.dragAnchor.x, b.x, b.x + b.width - this.region.width);
+    this.region.y = clamp(mouseY - this.dragAnchor.y, b.y, b.y + b.height - this.region.height);
 
     this.draw();
     this.adjustZoomDuringInteraction();
@@ -915,6 +952,17 @@ class TransformManager implements EditToolManager {
     const minSize = 50;
     let newRegion = { ...currentCrop };
 
+    // Rotation-aware outer bounds. Without free rotation this is (0..W, 0..H);
+    // with rotation it's the inscribed rectangle so resize handles stop at
+    // the inner edge of the rotated image instead of on a transparent wedge.
+    const b = this.rotationBounds;
+    const boundsMinX = b.x;
+    const boundsMinY = b.y;
+    const boundsMaxX = b.x + b.width;
+    const boundsMaxY = b.y + b.height;
+    const boundsW = b.width;
+    const boundsH = b.height;
+
     let desiredWidth = width;
     let desiredHeight = height;
 
@@ -923,13 +971,13 @@ class TransformManager implements EditToolManager {
       case ResizeBoundary.Left:
       case ResizeBoundary.TopLeft:
       case ResizeBoundary.BottomLeft: {
-        desiredWidth = Math.max(minSize, width + (x - Math.max(mouseX, 0)));
+        desiredWidth = Math.max(minSize, width + (x - Math.max(mouseX, boundsMinX)));
         break;
       }
       case ResizeBoundary.Right:
       case ResizeBoundary.TopRight:
       case ResizeBoundary.BottomRight: {
-        desiredWidth = Math.max(minSize, Math.max(mouseX, 0) - x);
+        desiredWidth = Math.max(minSize, Math.min(mouseX, boundsMaxX) - x);
         break;
       }
     }
@@ -939,27 +987,26 @@ class TransformManager implements EditToolManager {
       case ResizeBoundary.Top:
       case ResizeBoundary.TopLeft:
       case ResizeBoundary.TopRight: {
-        desiredHeight = Math.max(minSize, height + (y - Math.max(mouseY, 0)));
+        desiredHeight = Math.max(minSize, height + (y - Math.max(mouseY, boundsMinY)));
         break;
       }
       case ResizeBoundary.Bottom:
       case ResizeBoundary.BottomLeft:
       case ResizeBoundary.BottomRight: {
-        desiredHeight = Math.max(minSize, Math.max(mouseY, 0) - y);
+        desiredHeight = Math.max(minSize, Math.min(mouseY, boundsMaxY) - y);
         break;
       }
     }
 
-    // Old
     switch (this.resizeSide) {
       case ResizeBoundary.Left: {
         const { newWidth: w, newHeight: h } = this.keepAspectRatio(desiredWidth, height);
-        const finalWidth = clamp(w, minSize, this.displayedImageWidth);
+        const finalWidth = clamp(w, minSize, boundsW);
         newRegion = {
-          x: Math.max(0, x + width - finalWidth),
+          x: Math.max(boundsMinX, x + width - finalWidth),
           y,
           width: finalWidth,
-          height: clamp(h, minSize, this.displayedImageHeight),
+          height: clamp(h, minSize, boundsH),
         };
         break;
       }
@@ -967,8 +1014,8 @@ class TransformManager implements EditToolManager {
         const { newWidth: w, newHeight: h } = this.keepAspectRatio(desiredWidth, height);
         newRegion = {
           ...newRegion,
-          width: clamp(w, minSize, this.displayedImageWidth - x),
-          height: clamp(h, minSize, this.displayedImageHeight),
+          width: clamp(w, minSize, boundsMaxX - x),
+          height: clamp(h, minSize, boundsH),
         };
         break;
       }
@@ -977,13 +1024,13 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          this.displayedImageWidth,
-          this.displayedImageHeight,
+          boundsW,
+          boundsH,
           minSize,
         );
         newRegion = {
           x,
-          y: Math.max(0, y + height - h),
+          y: Math.max(boundsMinY, y + height - h),
           width: w,
           height: h,
         };
@@ -994,8 +1041,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          this.displayedImageWidth,
-          this.displayedImageHeight - y,
+          boundsW,
+          boundsMaxY - y,
           minSize,
         );
         newRegion = {
@@ -1010,13 +1057,13 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          this.displayedImageWidth,
-          this.displayedImageHeight,
+          boundsW,
+          boundsH,
           minSize,
         );
         newRegion = {
-          x: Math.max(0, x + width - w),
-          y: Math.max(0, y + height - h),
+          x: Math.max(boundsMinX, x + width - w),
+          y: Math.max(boundsMinY, y + height - h),
           width: w,
           height: h,
         };
@@ -1027,13 +1074,13 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          this.displayedImageWidth - x,
-          y + height,
+          boundsMaxX - x,
+          y + height - boundsMinY,
           minSize,
         );
         newRegion = {
           x,
-          y: Math.max(0, y + height - h),
+          y: Math.max(boundsMinY, y + height - h),
           width: w,
           height: h,
         };
@@ -1044,12 +1091,12 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          this.displayedImageWidth,
-          this.displayedImageHeight - y,
+          boundsW,
+          boundsMaxY - y,
           minSize,
         );
         newRegion = {
-          x: Math.max(0, x + width - w),
+          x: Math.max(boundsMinX, x + width - w),
           y,
           width: w,
           height: h,
@@ -1061,8 +1108,8 @@ class TransformManager implements EditToolManager {
           desiredWidth,
           desiredHeight,
           this.cropAspectRatio,
-          this.displayedImageWidth - x,
-          this.displayedImageHeight - y,
+          boundsMaxX - x,
+          boundsMaxY - y,
           minSize,
         );
         newRegion = {
@@ -1074,11 +1121,11 @@ class TransformManager implements EditToolManager {
       }
     }
 
-    // Constrain the region to canvas bounds
+    // Constrain the region to the rotation-aware bounds.
     this.region = {
       ...newRegion,
-      x: Math.max(0, Math.min(newRegion.x, this.displayedImageWidth - newRegion.width)),
-      y: Math.max(0, Math.min(newRegion.y, this.displayedImageHeight - newRegion.height)),
+      x: Math.max(boundsMinX, Math.min(newRegion.x, boundsMaxX - newRegion.width)),
+      y: Math.max(boundsMinY, Math.min(newRegion.y, boundsMaxY - newRegion.height)),
     };
 
     this.draw();
@@ -1094,6 +1141,40 @@ class TransformManager implements EditToolManager {
       width: this.cropImageSize.width * this.cropImageScale - 1,
       height: this.cropImageSize.height * this.cropImageScale - 1,
     };
+  }
+
+  /**
+   * Called from CropArea whenever freeRotation changes. Shrinks and/or
+   * shifts the crop region so it stays inside the rotated image's
+   * inscribed rectangle — i.e. so none of the frame's corners fall onto
+   * a transparent wedge. Preserves the current cropAspectRatio.
+   */
+  clampRegionToRotationBounds() {
+    if (!this.isImageLoaded) return;
+    const bounds = this.rotationBounds;
+    let { x, y, width, height } = this.region;
+
+    // Cap dimensions to the inscribed rect, honoring aspect ratio if set.
+    if (width > bounds.width || height > bounds.height) {
+      const ratioParts = this.cropAspectRatio.split(':').map(Number);
+      const [rW, rH] = ratioParts;
+      if (this.cropAspectRatio !== 'free' && rW && rH) {
+        const ratio = rW / rH;
+        const fitW = Math.min(bounds.width, bounds.height * ratio);
+        const fitH = fitW / ratio;
+        width = fitW;
+        height = fitH;
+      } else {
+        width = Math.min(width, bounds.width);
+        height = Math.min(height, bounds.height);
+      }
+    }
+
+    x = clamp(x, bounds.x, bounds.x + bounds.width - width);
+    y = clamp(y, bounds.y, bounds.y + bounds.height - height);
+
+    this.region = { x, y, width, height };
+    this.draw();
   }
 
   rotateAspectRatio() {

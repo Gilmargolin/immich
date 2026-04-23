@@ -47,40 +47,21 @@
     }
   });
 
-  /**
-   * Scale factor so that, when rotated by θ, the image's rotated quad
-   * fully covers the crop frame (the axis-aligned W×H box at the image's
-   * layout size). Standard cover-after-rotation math; the max of the two
-   * corner constraints is the binding one.
-   *
-   *   scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
-   *
-   * This is the original Immich behavior — image grows slightly on
-   * rotation, frame stays at its user-drawn size, and the .crop-area's
-   * `overflow: hidden` (+ `contain: paint`) clips the extension so nothing
-   * bleeds outside the image box even for portrait photos in a wide viewport.
-   */
-  let imageScale = $derived.by(() => {
-    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
-    if (theta === 0) return 1;
-    const img = transformManager.imgElement;
-    if (!img || img.width === 0 || img.height === 0) return 1;
-    const cosT = Math.cos(theta);
-    const sinT = Math.sin(theta);
-    return Math.max(cosT + (img.height / img.width) * sinT, (img.width / img.height) * sinT + cosT);
-  });
-
+  // Image rotates in place at its natural rendered size — no cover-scale.
+  // Cover-scaling (the old max(cosθ + (H/W)sinθ, (W/H)sinθ + cosθ) trick)
+  // grows the image to hide the four transparent wedges that rotation
+  // normally leaves at the corners of the image box, but at 30–45° that
+  // enlargement is 1.6–2×, which reads as "the image got blown up" and
+  // hides content the user needs to see to choose their crop.
+  //
+  // Instead, the image stays at 1× and the crop frame is auto-constrained
+  // to the inscribed rectangle (see transformManager.rotationBounds) so
+  // no transparent wedge ever appears inside the bright part of the
+  // frame. The four dim/dark wedges outside the frame are covered by the
+  // existing overlay, matching the Google Photos / Lightroom layout.
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
-    // Scale FIRST so the rotated image still covers the frame — this is
-    // how the original (working) implementation did it. With `scale(X) rotate(Y)`
-    // CSS applies rotate first then scale, which is the order we want
-    // (rotate the image around center, then scale it up just enough to
-    // cover its original W×H box).
-    if (imageScale !== 1) {
-      transforms.push(`scale(${imageScale})`);
-    }
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
     }
@@ -93,6 +74,18 @@
     }
 
     return transforms.join(' ');
+  });
+
+  // Whenever the user spins the dial, shrink/move the crop region to stay
+  // within the rotated image's inscribed rectangle so no corner of the
+  // frame falls onto a transparent wedge. Also tracks isImageLoaded so
+  // we re-clamp once the image actually finishes loading (otherwise a
+  // pre-existing free-rotation on a just-opened asset wouldn't trigger
+  // a clamp, leaving the frame extending past the inscribed bounds).
+  $effect(() => {
+    const _rot = transformManager.freeRotation;
+    const _loaded = transformManager.isImageLoaded;
+    transformManager.clampRegionToRotationBounds();
   });
 
 
@@ -132,9 +125,10 @@
     const transition = interacting ? 'transition: none;' : 'transition: transform 0.3s ease;';
 
     // While any free rotation is active, pin the effective zoom to 1.
-    // The rotation's own imageScale on the <img> handles the cover fit;
-    // layering cropZoom's scale() here on cropArea would compound with
-    // that and read as a big unwanted zoom after any drag/resize.
+    // Scaling cropArea under rotation would visually magnify the rotated
+    // image (and the dark wedges at its corners), which reads as "image
+    // blown up". The inscribed-rect clamp on the frame already keeps the
+    // crop inside the usable image area; no extra zoom needed.
     const zoom = transformManager.freeRotation !== 0 ? 1 : transformManager.cropZoom;
 
     if (zoom <= 1) {
