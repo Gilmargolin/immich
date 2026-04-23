@@ -47,19 +47,40 @@
     }
   });
 
+  /**
+   * Scale factor so that, when rotated by θ, the image's rotated quad
+   * fully covers the crop frame (the axis-aligned W×H box at the image's
+   * layout size). Standard cover-after-rotation math; the max of the two
+   * corner constraints is the binding one.
+   *
+   *   scale = max(cosθ + (H/W)·sinθ, (W/H)·sinθ + cosθ)
+   *
+   * This is the original Immich behavior — image grows slightly on
+   * rotation, frame stays at its user-drawn size, and the .crop-area's
+   * `overflow: hidden` (+ `contain: paint`) clips the extension so nothing
+   * bleeds outside the image box even for portrait photos in a wide viewport.
+   */
+  let imageScale = $derived.by(() => {
+    const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
+    if (theta === 0) return 1;
+    const img = transformManager.imgElement;
+    if (!img || img.width === 0 || img.height === 0) return 1;
+    const cosT = Math.cos(theta);
+    const sinT = Math.sin(theta);
+    return Math.max(cosT + (img.height / img.width) * sinT, (img.width / img.height) * sinT + cosT);
+  });
+
   let imageTransform = $derived.by(() => {
     const transforms: string[] = [];
 
-    // Free rotation: no cover-scale. The image rotates in place at its
-    // actual rendered size. Earlier iterations scaled the image up by
-    // `max(cosθ + (H/W)sinθ, (W/H)sinθ + cosθ)` so the rotated quad
-    // still covered the crop frame — but at −3° that's already a 7.7%
-    // enlargement, and as the user drags the frame smaller that
-    // growth stays and reads as the image "jumping out of scale"
-    // relative to the shrinking frame. Trade-off: transparent wedges
-    // can appear at the crop-frame corners at non-zero rotations; the
-    // server's rotate → inscribed-extract step already trims those on
-    // save so the final output is clean.
+    // Scale FIRST so the rotated image still covers the frame — this is
+    // how the original (working) implementation did it. With `scale(X) rotate(Y)`
+    // CSS applies rotate first then scale, which is the order we want
+    // (rotate the image around center, then scale it up just enough to
+    // cover its original W×H box).
+    if (imageScale !== 1) {
+      transforms.push(`scale(${imageScale})`);
+    }
     if (transformManager.freeRotation !== 0) {
       transforms.push(`rotate(${transformManager.freeRotation}deg)`);
     }
@@ -71,7 +92,16 @@
       transforms.push('scaleY(-1)');
     }
 
-    return transforms.join(' ');
+    const result = transforms.join(' ');
+    // eslint-disable-next-line no-console
+    console.info('[rotate-drag-debug] imageTransform', {
+      freeRotation: transformManager.freeRotation,
+      imageScale,
+      imgNaturalW: transformManager.imgElement?.width,
+      imgNaturalH: transformManager.imgElement?.height,
+      applied: result,
+    });
+    return result;
   });
 
 
@@ -110,9 +140,19 @@
     const interacting = transformManager.isInteracting;
     const transition = interacting ? 'transition: none;' : 'transition: transform 0.3s ease;';
 
-    // While any free rotation is active, pin the effective zoom to 1
-    // so cropZoom's scale() doesn't compound with anything on the <img>.
+    // While any free rotation is active, pin the effective zoom to 1.
+    // The rotation's own imageScale on the <img> handles the cover fit;
+    // layering cropZoom's scale() here on cropArea would compound with
+    // that and read as a big unwanted zoom after any drag/resize.
     const zoom = transformManager.freeRotation !== 0 ? 1 : transformManager.cropZoom;
+    // eslint-disable-next-line no-console
+    console.info('[rotate-drag-debug] cropAreaStyle', {
+      freeRotation: transformManager.freeRotation,
+      cropZoom: transformManager.cropZoom,
+      effectiveZoom: zoom,
+      isInteracting: transformManager.isInteracting,
+      region: { ...transformManager.region },
+    });
 
     if (zoom <= 1) {
       return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
