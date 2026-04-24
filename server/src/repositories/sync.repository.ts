@@ -518,10 +518,20 @@ class AssetEditSync extends BaseSync {
 
   @GenerateSql({ params: [dummyQueryOptions], stream: true })
   getUpserts(options: SyncQueryOptions) {
+    // Fork-custom filter: exclude `action='adjust'` rows from the mobile
+    // sync stream. This fork adds AssetEditAction.Adjust (image-adjustment
+    // sliders — brightness/contrast/etc.) that upstream doesn't know about.
+    // The iOS / Android openapi-generated enum only includes crop / rotate /
+    // mirror, so a row with action='adjust' in the SyncAssetEditV1 payload
+    // makes mobile's JSON deserializer throw and the entire background
+    // backup aborts before any upload POST (symptom: "cannot process
+    // backup" on iPhone, manual uploads still work). The web client reads
+    // edits via other endpoints and is unaffected.
     return this.upsertQuery('asset_edit', options)
       .select([...columns.syncAssetEdit, 'asset_edit.updateId'])
       .innerJoin('asset', 'asset.id', 'asset_edit.assetId')
       .where('asset.ownerId', '=', options.userId)
+      .where('asset_edit.action', '!=', 'adjust')
       .stream();
   }
 }
