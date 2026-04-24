@@ -63,11 +63,19 @@
   let imageScale = $derived.by(() => {
     const theta = Math.abs(transformManager.freeRotation * Math.PI / 180);
     if (theta === 0) return 1;
-    const img = transformManager.imgElement;
-    if (!img || img.width === 0 || img.height === 0) return 1;
+    // Read cropImageSize ($state), not imgElement.width directly — the
+    // native `.width` property is not reactive, so when an asset is
+    // re-opened with a pre-existing rotation the derived runs once
+    // before the image finishes loading (width = 0, returns 1) and
+    // then never re-runs. Result: cover-scale is missing and the user
+    // sees black triangular wedges inside the crop frame. cropImageSize
+    // is updated in onImageLoad, so reading it here re-fires this
+    // derived the moment the image dims become known.
+    const { width: W, height: H } = transformManager.cropImageSize;
+    if (W === 0 || H === 0) return 1;
     const cosT = Math.cos(theta);
     const sinT = Math.sin(theta);
-    return Math.max(cosT + (img.height / img.width) * sinT, (img.width / img.height) * sinT + cosT);
+    return Math.max(cosT + (H / W) * sinT, (W / H) * sinT + cosT);
   });
 
   let imageTransform = $derived.by(() => {

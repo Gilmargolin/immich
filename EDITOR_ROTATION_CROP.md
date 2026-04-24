@@ -182,6 +182,27 @@ Needs to swap img.width and img.height when computing scale — the
 rotated content's bounding box is the *swapped* dims. Without this, a
 rotated portrait extends past the viewport horizontally.
 
+### 5.11. Reading non-reactive DOM properties in a $derived
+HTMLImageElement's `.width` / `.height` / `.naturalWidth` / `.complete`
+are plain native properties, not Svelte state. Reading them inside a
+`$derived.by(...)` does NOT subscribe the derived to their changes —
+so the derived only re-runs when *other* tracked deps change.
+
+Concrete trap: on re-opening an asset with a pre-existing free
+rotation, onActivate sets `freeRotation` before the preview finishes
+loading. If `imageScale` is computed as
+`$derived.by(() => ...img.width...)`, the derived runs once with
+img.width = 0, returns 1 (no cover-scale), and never re-runs when
+the image finally loads. Result: black triangular wedges appear at
+the crop-frame corners in the editor.
+
+Fix: read a $state field that IS updated on image load. For this
+editor, use `transformManager.cropImageSize` (set in onImageLoad)
+instead of `img.width` / `img.height`.
+
+Last working fix: commit for the "rotate → save → edit again"
+bug. Search `reading cropImageSize` in crop-area.svelte.
+
 
 ## 6. Regression checklist (run manually before shipping changes here)
 
@@ -204,6 +225,10 @@ Before pushing any change to the files in section 1:
         saved state with the same framing; aspect ratio did not drift.
   - [ ] Save an adjust-only edit (don't enter crop mode). The saved
         output preserves any pre-existing crop/rotation.
+  - [ ] Save a rotated crop. Close the editor. Re-open on the SAME
+        asset. The crop frame shows cover-scaled rotated content with
+        NO black/transparent wedges at the frame corners. [Gate for
+        the non-reactive img.width trap in §5.11.]
 
 
 ## 7. Where to add new logging
