@@ -123,31 +123,36 @@
     };
   });
 
-  // Use matching transform function list so CSS transitions interpolate.
-  // During interaction, use frozen anchor region for translate to prevent coordinate drift.
-  // Disable transition during interaction so zoom adjustments are instant.
-  let cropAreaStyle = $derived.by(() => {
+  // Per-property reactive values instead of one `style={string}` blob.
+  // The blob form replaces the whole `style` attribute on every derived
+  // update, which was wiping the inline `width`/`height` that
+  // applyImageSize had set — cropArea then fell back to
+  // max-width/height:100%, ballooned to the viewport, and the <img>
+  // inside (still at its fixed pixel size) suddenly had its previously
+  // clipped extension visible on the right. That only fired *after* the
+  // user touched the dial or dragged a handle because those are the
+  // events that cause the derived to re-run.
+  //
+  // With style:property={value} directives Svelte manages each property
+  // independently, so width/height set by applyImageSize coexists with
+  // the reactive transform/transition without being clobbered.
+  let cropTransition = $derived(
+    transformManager.isInteracting ? 'none' : 'transform 0.3s ease',
+  );
+  let cropTransform = $derived.by(() => {
     const rotation = transformManager.imageRotation;
-    const interacting = transformManager.isInteracting;
-    const transition = interacting ? 'transition: none;' : 'transition: transform 0.3s ease;';
-
-    // While any free rotation is active, pin the effective zoom to 1.
-    // The rotation's own imageScale on the <img> handles the cover fit;
-    // layering cropZoom's scale() here on cropArea would compound with
-    // that and read as a big unwanted zoom after any drag/resize.
     const zoom = transformManager.freeRotation !== 0 ? 1 : transformManager.cropZoom;
 
     if (zoom <= 1) {
-      return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
+      return `translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
     }
 
     const el = transformManager.cropAreaEl;
-    if (!el) return `${transition} transform: translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
+    if (!el) return `translate(0px, 0px) rotate(${rotation}deg) scale(1)`;
 
     const W = el.clientWidth;
     const H = el.clientHeight;
 
-    // Use anchor region during drag so translate stays stable
     const r = transformManager.zoomAnchorRegion ?? transformManager.region;
     const cx = r.x + r.width / 2;
     const cy = r.y + r.height / 2;
@@ -162,7 +167,7 @@
     const tx = -(zoom * dx * cosT - zoom * dy * sinT);
     const ty = -(zoom * dx * sinT + zoom * dy * cosT);
 
-    return `${transition} transform: translate(${tx}px, ${ty}px) rotate(${rotation}deg) scale(${zoom})`;
+    return `translate(${tx}px, ${ty}px) rotate(${rotation}deg) scale(${zoom})`;
   });
 
   // Show grid when free rotating or interacting
@@ -227,7 +232,8 @@
   <div class="crop-viewport">
     <button
       class={`crop-area ${transformManager.orientationChanged ? 'changedOriention' : ''}`}
-      style={cropAreaStyle}
+      style:transition={cropTransition}
+      style:transform={cropTransform}
       bind:this={transformManager.cropAreaEl}
       onmousedown={(e) => transformManager.handleMouseDown(e)}
       onmouseup={() => transformManager.handleMouseUp()}
@@ -239,7 +245,8 @@
         draggable="false"
         src={imageSrc}
         alt={$getAltText(toTimelineAsset(asset))}
-        style="{imageTransform ? `transform: ${imageTransform};` : ''} filter: url(#crop-adjust-filter);"
+        style:transform={imageTransform || undefined}
+        style:filter="url(#crop-adjust-filter)"
       />
       <div
         class={`${showGrid ? 'resizing' : ''} crop-frame`}
