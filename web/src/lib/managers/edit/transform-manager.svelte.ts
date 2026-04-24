@@ -191,7 +191,39 @@ class TransformManager implements EditToolManager {
         to: this.originalImageSize,
       });
 
-      // Constrain to original image bounds (fixes possible rounding errors)
+      // Pre-compensate for the server's post-rotation inscribed-extract.
+      // Server pipeline is: crop → mirror → axis-align rotate → free
+      // rotate → inscribed extract. The final step shrinks a W×H crop
+      // to iW×iH where iW=(W cosθ − H sinθ)/cos2θ, so what the editor
+      // previewed (W×H covered by rotated content) and what actually
+      // gets saved (iW×iH) differ — the output is always narrower and
+      // at a slightly different aspect ratio than the user drew.
+      //
+      // Expand the crop to W' = W cosθ + H sinθ, H' = H cosθ + W sinθ
+      // (the cover-scale inverse). Server inscribes W'×H' back down to
+      // exactly W×H, matching the editor preview. Formula is symmetric
+      // in W and H so it works regardless of whether a 90° axis-align
+      // rotation swaps the dims before the free rotate.
+      if (Math.abs(this.freeRotation) > 0.01) {
+        const theta = Math.abs(this.freeRotation) * (Math.PI / 180);
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const A = cropRegion.width;
+        const B = cropRegion.height;
+        const cx = cropRegion.x + A / 2;
+        const cy = cropRegion.y + B / 2;
+        const newW = A * cosT + B * sinT;
+        const newH = B * cosT + A * sinT;
+        cropRegion = {
+          x: Math.round(cx - newW / 2),
+          y: Math.round(cy - newH / 2),
+          width: Math.round(newW),
+          height: Math.round(newH),
+        };
+      }
+
+      // Constrain to original image bounds (fixes possible rounding errors
+      // and the cover-scale expansion above potentially pushing past edges).
       cropRegion = this.constrainToBounds(cropRegion, this.originalImageSize);
 
       edits.push({

@@ -182,6 +182,21 @@ Needs to swap img.width and img.height when computing scale — the
 rotated content's bounding box is the *swapped* dims. Without this, a
 rotated portrait extends past the viewport horizontally.
 
+### 5.11a. Saved output narrower than drawn — inscribed-extract shrink
+Server pipeline is `crop → mirror → axis-align rotate → free rotate →
+inscribed extract`. The final step shrinks a W×H crop to
+`((W cosθ − H sinθ)/cos 2θ) × ((H cosθ − W sinθ)/cos 2θ)`. Without
+compensation the editor shows W×H (via imageScale cover-up of the
+rotated image) but the saved file is the *inscribed* output — always
+narrower and at a different aspect ratio.
+
+Fix: in `TransformManager.getEdits()` expand the Crop before sending,
+applying the cover-scale inverse:
+`W' = W cosθ + H sinθ`, `H' = H cosθ + W sinθ`. Server inscribes
+W'×H' back to exactly W×H. Formula is symmetric in W,H so it works
+regardless of 90°/270° axis-align rotation. Clamp to original image
+bounds after expansion in case it exceeds the image edge.
+
 ### 5.11. Reading non-reactive DOM properties in a $derived
 HTMLImageElement's `.width` / `.height` / `.naturalWidth` / `.complete`
 are plain native properties, not Svelte state. Reading them inside a
