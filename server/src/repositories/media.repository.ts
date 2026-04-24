@@ -7,7 +7,13 @@ import { Writable } from 'node:stream';
 import sharp from 'sharp';
 import { ORIENTATION_TO_SHARP_ROTATION } from 'src/constants';
 import { Exif } from 'src/database';
-import { AdjustParameters, AssetEditActionItem } from 'src/dtos/editing.dto';
+import {
+  AdjustmentSliders,
+  AdjustParameters,
+  AssetEditActionItem,
+  LocalMask,
+  LocalMaskKind,
+} from 'src/dtos/editing.dto';
 import { Colorspace, LogLevel, RawExtractedFormat } from 'src/enum';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import {
@@ -69,16 +75,19 @@ const smoothstep = (edge0: number, edge1: number, x: number): number => {
   return t * t * (3 - 2 * t);
 };
 
+const isSlidersActive = (s: AdjustmentSliders): boolean =>
+  s.brightness !== 0 ||
+  s.contrast !== 0 ||
+  s.saturation !== 0 ||
+  s.warmth !== 0 ||
+  s.tint !== 0 ||
+  s.highlights !== 0 ||
+  s.shadows !== 0 ||
+  s.whitePoint !== 0 ||
+  s.blackPoint !== 0;
+
 const isAdjustActive = (p: AdjustParameters): boolean =>
-  p.brightness !== 0 ||
-  p.contrast !== 0 ||
-  p.saturation !== 0 ||
-  p.warmth !== 0 ||
-  p.tint !== 0 ||
-  p.highlights !== 0 ||
-  p.shadows !== 0 ||
-  p.whitePoint !== 0 ||
-  p.blackPoint !== 0;
+  isSlidersActive(p) || (p.masks !== undefined && p.masks.length > 0);
 
 // Per-channel contrast S-curve (positive) / flatten (negative) in linear space.
 // k in [-1, 1]. k > 0: cubic smoothstep toward extremes. k < 0: mix toward mid-gray.
@@ -91,6 +100,185 @@ const applyContrast = (v: number, k: number): number => {
   return clamped * (1 + k) + 0.5 * -k;
 };
 
+type PrecomputedSliders = {
+  active: boolean;
+  hasWb: boolean;
+  warmthR: number;
+  warmthB: number;
+  tintG: number;
+  hasExposure: boolean;
+  exposureMult: number;
+  hasTonal: boolean;
+  highAmp: number;
+  shadAmp: number;
+  whiteAmp: number;
+  blackAmp: number;
+  hasSat: boolean;
+  satMult: number;
+  hasContrast: boolean;
+  contrastK: number;
+};
+
+const precomputeSliders = (s: AdjustmentSliders): PrecomputedSliders => {
+  const exposureMult = s.brightness === 0 ? 1 : Math.pow(2, s.brightness * 2);
+  const warmthR = 1 + s.warmth * 0.3;
+  const warmthB = 1 / (1 + s.warmth * 0.3);
+  const tintG = 1 + s.tint * 0.2;
+  const hasWb = s.warmth !== 0 || s.tint !== 0;
+  const hasExposure = exposureMult !== 1;
+  const hasTonal = s.highlights !== 0 || s.shadows !== 0 || s.whitePoint !== 0 || s.blackPoint !== 0;
+  const hasSat = s.saturation !== 0;
+  const hasContrast = s.contrast !== 0;
+  return {
+    active: hasWb || hasExposure || hasTonal || hasSat || hasContrast,
+    hasWb,
+    warmthR,
+    warmthB,
+    tintG,
+    hasExposure,
+    exposureMult,
+    hasTonal,
+    highAmp: s.highlights * 0.25,
+    shadAmp: s.shadows * 0.25,
+    whiteAmp: s.whitePoint * 0.15,
+    blackAmp: s.blackPoint * 0.15,
+    hasSat,
+    satMult: 1 + s.saturation,
+    hasContrast,
+    contrastK: s.contrast,
+  };
+};
+
+// Scratch return container. Hot loop: 6M+ pixels × (1 + mask-count) calls,
+// so allocating a fresh object per call is expensive — reuse one module-local.
+// Single-threaded by Node semantics; safe here.
+const rgbScratch = { r: 0, g: 0, b: 0 };
+
+const applyPrecomputedSliders = (
+  rIn: number,
+  gIn: number,
+  bIn: number,
+  c: PrecomputedSliders,
+): { r: number; g: number; b: number } => {
+  let r = rIn;
+  let g = gIn;
+  let b = bIn;
+
+  if (c.hasWb) {
+    r *= c.warmthR;
+    g *= c.tintG;
+    b *= c.warmthB;
+  }
+  if (c.hasExposure) {
+    r *= c.exposureMult;
+    g *= c.exposureMult;
+    b *= c.exposureMult;
+  }
+  if (c.hasTonal) {
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const yClamped = y < 0 ? 0 : y > 1 ? 1 : y;
+    const highMask = smoothstep(0.5, 1, yClamped);
+    const shadMask = 1 - smoothstep(0, 0.5, yClamped);
+    const whiteMask = smoothstep(0.75, 1, yClamped);
+    const blackMask = 1 - smoothstep(0, 0.25, yClamped);
+    const deltaY = c.highAmp * highMask + c.shadAmp * shadMask + c.whiteAmp * whiteMask + c.blackAmp * blackMask;
+
+    if (deltaY !== 0) {
+      if (y > 0.001) {
+        const scale = (y + deltaY) / y;
+        r *= scale;
+        g *= scale;
+        b *= scale;
+      } else {
+        r += deltaY;
+        g += deltaY;
+        b += deltaY;
+      }
+    }
+  }
+  if (c.hasSat) {
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    r = y + (r - y) * c.satMult;
+    g = y + (g - y) * c.satMult;
+    b = y + (b - y) * c.satMult;
+  }
+  if (c.hasContrast) {
+    r = applyContrast(r, c.contrastK);
+    g = applyContrast(g, c.contrastK);
+    b = applyContrast(b, c.contrastK);
+  }
+
+  rgbScratch.r = r;
+  rgbScratch.g = g;
+  rgbScratch.b = b;
+  return rgbScratch;
+};
+
+type PrecomputedMask = {
+  sliders: PrecomputedSliders;
+  weight: (x: number, y: number) => number;
+};
+
+// Build a per-pixel weight function from a LocalMask. Coordinates in the mask
+// DTO are normalized: cx/ax/etc to [0,1] of image width; cy/ay/etc to [0,1] of
+// image height. Radial rx/ry are normalized to min(W, H) so rx=ry renders as a
+// circle regardless of image aspect.
+const precomputeMask = (mask: LocalMask, width: number, height: number): PrecomputedMask => {
+  const sliders = precomputeSliders(mask.params);
+
+  if (mask.kind === LocalMaskKind.Linear) {
+    const ax = mask.ax * width;
+    const ay = mask.ay * height;
+    const bx = mask.bx * width;
+    const by = mask.by * height;
+    const vx = bx - ax;
+    const vy = by - ay;
+    const lenSq = vx * vx + vy * vy;
+    if (lenSq < 1e-6) {
+      return { sliders, weight: () => 0 };
+    }
+    const nx = vx / lenSq;
+    const ny = vy / lenSq;
+    return {
+      sliders,
+      weight: (x, y) => {
+        const t = (x - ax) * nx + (y - ay) * ny;
+        const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+        return 1 - clamped * clamped * (3 - 2 * clamped);
+      },
+    };
+  }
+
+  const minDim = Math.min(width, height);
+  const cx = mask.cx * width;
+  const cy = mask.cy * height;
+  const rx = Math.max(1, mask.rx * minDim);
+  const ry = Math.max(1, mask.ry * minDim);
+  const rad = (-mask.angle * Math.PI) / 180;
+  const cosA = Math.cos(rad);
+  const sinA = Math.sin(rad);
+  const featherStart = Math.max(0, 1 - Math.max(0.001, mask.feather));
+  const invert = mask.invert;
+
+  return {
+    sliders,
+    weight: (x, y) => {
+      const dx = x - cx;
+      const dy = y - cy;
+      const dxr = dx * cosA - dy * sinA;
+      const dyr = dx * sinA + dy * cosA;
+      const rxN = dxr / rx;
+      const ryN = dyr / ry;
+      const d = Math.sqrt(rxN * rxN + ryN * ryN);
+      let w = 1 - smoothstep(featherStart, 1, d);
+      if (invert) {
+        w = 1 - w;
+      }
+      return w;
+    },
+  };
+};
+
 // Apply color/lighting adjustments by materializing the pipeline to an 8-bit
 // sRGB raw buffer, doing per-pixel math in linear light (correct gamma), then
 // re-ingesting. This gives us:
@@ -99,6 +287,7 @@ const applyContrast = (v: number, k: number): number => {
 //   - range-selective highlights/shadows/whites/blacks via smooth luminance
 //     masks, applied as hue-preserving RGB scales
 //   - saturation and contrast in linear space so mid-tones don't get muddy
+//   - optional local masks (linear gradient, radial ellipse) layered on top
 const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters): Promise<sharp.Sharp> => {
   const { data, info } = await pipeline.toColorspace('srgb').raw().toBuffer({ resolveWithObject: true });
   const { width, height, channels } = info;
@@ -106,80 +295,43 @@ const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters)
     return sharp(data, { raw: { width, height, channels } });
   }
 
+  const globalSliders = precomputeSliders(params);
+  const masks = (params.masks ?? [])
+    .map((m) => precomputeMask(m, width, height))
+    .filter((m) => m.sliders.active);
+
+  if (!globalSliders.active && masks.length === 0) {
+    return sharp(data, { raw: { width, height, channels } });
+  }
+
   const out = Buffer.alloc(data.length);
+  const maskCount = masks.length;
 
-  // Slider → math constants. Slider range is [-1, 1] everywhere.
-  const exposureMult = params.brightness === 0 ? 1 : Math.pow(2, params.brightness * 2);
-  // Reciprocal pair for warmth keeps mid-luminance roughly stable while
-  // rotating R↔B, which is the Lightroom-style WB behavior.
-  const warmthR = 1 + params.warmth * 0.3;
-  const warmthB = 1 / (1 + params.warmth * 0.3);
-  const tintG = 1 + params.tint * 0.2;
-  const satMult = 1 + params.saturation;
-  const contrastK = params.contrast;
-  const highAmp = params.highlights * 0.25;
-  const shadAmp = params.shadows * 0.25;
-  const whiteAmp = params.whitePoint * 0.15;
-  const blackAmp = params.blackPoint * 0.15;
+  let pixelIndex = 0;
+  for (let i = 0; i < data.length; i += channels, pixelIndex++) {
+    const x = pixelIndex % width;
+    const y = (pixelIndex / width) | 0;
 
-  const hasWb = params.warmth !== 0 || params.tint !== 0;
-  const hasExposure = exposureMult !== 1;
-  const hasTonal =
-    params.highlights !== 0 || params.shadows !== 0 || params.whitePoint !== 0 || params.blackPoint !== 0;
-  const hasSat = params.saturation !== 0;
-  const hasContrast = params.contrast !== 0;
-
-  for (let i = 0; i < data.length; i += channels) {
     let r = SRGB_TO_LINEAR_LUT[data[i]];
     let g = SRGB_TO_LINEAR_LUT[data[i + 1]];
     let b = SRGB_TO_LINEAR_LUT[data[i + 2]];
 
-    if (hasWb) {
-      r *= warmthR;
-      g *= tintG;
-      b *= warmthB;
+    if (globalSliders.active) {
+      const adj = applyPrecomputedSliders(r, g, b, globalSliders);
+      r = adj.r;
+      g = adj.g;
+      b = adj.b;
     }
 
-    if (hasExposure) {
-      r *= exposureMult;
-      g *= exposureMult;
-      b *= exposureMult;
-    }
-
-    if (hasTonal) {
-      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      const yClamped = y < 0 ? 0 : y > 1 ? 1 : y;
-      const highMask = smoothstep(0.5, 1, yClamped);
-      const shadMask = 1 - smoothstep(0, 0.5, yClamped);
-      const whiteMask = smoothstep(0.75, 1, yClamped);
-      const blackMask = 1 - smoothstep(0, 0.25, yClamped);
-      const deltaY = highAmp * highMask + shadAmp * shadMask + whiteAmp * whiteMask + blackAmp * blackMask;
-
-      if (deltaY !== 0) {
-        if (y > 0.001) {
-          const scale = (y + deltaY) / y;
-          r *= scale;
-          g *= scale;
-          b *= scale;
-        } else {
-          r += deltaY;
-          g += deltaY;
-          b += deltaY;
-        }
+    for (let mi = 0; mi < maskCount; mi++) {
+      const mask = masks[mi];
+      const w = mask.weight(x, y);
+      if (w > 0) {
+        const adj = applyPrecomputedSliders(r, g, b, mask.sliders);
+        r = r + (adj.r - r) * w;
+        g = g + (adj.g - g) * w;
+        b = b + (adj.b - b) * w;
       }
-    }
-
-    if (hasSat) {
-      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      r = y + (r - y) * satMult;
-      g = y + (g - y) * satMult;
-      b = y + (b - y) * satMult;
-    }
-
-    if (hasContrast) {
-      r = applyContrast(r, contrastK);
-      g = applyContrast(g, contrastK);
-      b = applyContrast(b, contrastK);
     }
 
     out[i] = linearToSrgb8(r);

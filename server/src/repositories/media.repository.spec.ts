@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import { AssetFace } from 'src/database';
-import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
+import { AssetEditAction, LocalMaskKind, MirrorAxis } from 'src/dtos/editing.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import { SourceType } from 'src/enum';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -10,10 +10,8 @@ import { checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor';
 import { automock } from 'test/utils';
 
 const getPixelColor = async (buffer: Buffer, x: number, y: number) => {
-  const metadata = await sharp(buffer).metadata();
-  const width = metadata.width!;
-  const { data } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
-  const idx = (y * width + x) * 4;
+  const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+  const idx = (y * info.width + x) * info.channels;
   return {
     r: data[idx],
     g: data[idx + 1],
@@ -571,6 +569,199 @@ describe(MediaRepository.name, () => {
       const metadata = await sharp(buffer).metadata();
       expect(metadata.width).toBe(100);
       expect(metadata.height).toBe(100);
+    });
+
+    it('should apply a linear-gradient mask darkening the top half only', async () => {
+      // 100×100 gray. Linear mask fading from weight 1 at y=0 to weight 0 at
+      // y=~50 (normalized 0→0.5). Mask params: brightness -1 (very dark).
+      // Expect top pixels darker than mid-gray, bottom pixels unchanged.
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Linear,
+                ax: 0.5,
+                ay: 0,
+                bx: 0.5,
+                by: 0.5,
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const top = await getPixelColor(buffer, 50, 5);
+      const bottom = await getPixelColor(buffer, 50, 95);
+      expect(top.r).toBeLessThan(120);
+      expect(bottom.r).toBeGreaterThan(170);
+      expect(bottom.r).toBeLessThan(190);
+    });
+
+    it('should apply a radial mask darkening only inside the ellipse', async () => {
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.25,
+                ry: 0.25,
+                angle: 0,
+                feather: 0.1,
+                invert: false,
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const center = await getPixelColor(buffer, 50, 50);
+      const corner = await getPixelColor(buffer, 5, 5);
+      expect(center.r).toBeLessThan(120);
+      expect(corner.r).toBeGreaterThan(170);
+    });
+
+    it('should layer masks in order: mask 2 operates on mask 1 output', async () => {
+      // Two radial masks cover the same area: mask 1 darkens (-0.5 exp = ×0.5),
+      // mask 2 brightens more than mask 1 darkened (+1 exp = ×4). Net ×2 in
+      // linear — final center is meaningfully brighter than the base, proving
+      // later masks don't fully replace earlier ones but stack on their output.
+      const imageBuffer = await buildGrayImage(128);
+
+      const darkenOnly = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.3,
+                ry: 0.3,
+                angle: 0,
+                feather: 0.05,
+                invert: false,
+                params: { ...defaultAdjust, brightness: -0.5 },
+              },
+            ],
+          },
+        },
+      ]);
+      const darkenOnlyCenter = (await getPixelColor(await darkenOnly.png().toBuffer(), 50, 50)).r;
+
+      const darkenThenBrighten = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.3,
+                ry: 0.3,
+                angle: 0,
+                feather: 0.05,
+                invert: false,
+                params: { ...defaultAdjust, brightness: -0.5 },
+              },
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.3,
+                ry: 0.3,
+                angle: 0,
+                feather: 0.05,
+                invert: false,
+                params: { ...defaultAdjust, brightness: 1 },
+              },
+            ],
+          },
+        },
+      ]);
+      const stackedCenter = (await getPixelColor(await darkenThenBrighten.png().toBuffer(), 50, 50)).r;
+
+      // Stacked masks push center brighter than base gray(128), and much
+      // brighter than mask-1 alone would have.
+      expect(stackedCenter).toBeGreaterThan(128);
+      expect(stackedCenter).toBeGreaterThan(darkenOnlyCenter);
+    });
+
+    it('should ignore a mask with all-zero params (no-op)', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.3,
+                ry: 0.3,
+                angle: 0,
+                feather: 0.1,
+                invert: false,
+                params: { ...defaultAdjust },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(avg.r).toBeCloseTo(128, -1);
+    });
+
+    it('should support inverted radial masks (effect outside the ellipse)', async () => {
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.25,
+                ry: 0.25,
+                angle: 0,
+                feather: 0.1,
+                invert: true,
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const center = await getPixelColor(buffer, 50, 50);
+      const corner = await getPixelColor(buffer, 5, 5);
+      expect(center.r).toBeGreaterThan(170);
+      expect(corner.r).toBeLessThan(120);
     });
   });
 
