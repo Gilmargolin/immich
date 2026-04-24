@@ -24,6 +24,24 @@ The owner must explicitly approve commits to `main` before you push.
 Do not bypass this.
 
 
+## Fork-custom server additions and mobile compatibility
+
+This fork adds server-side features that upstream mobile apps don't
+know about (e.g. `AssetEditAction.Adjust` from the image-adjustment
+sliders feature). If any such custom value leaks into the
+`/api/sync/stream` response, the upstream iOS / Android app's
+openapi-generated Dart deserializer crashes (`SyncAssetEditV1.fromJson`
+throws `Null check operator used on a null value`), the
+`runInIsolateGentle` isolate dies, and the user sees **"cannot process
+backup"** — manual uploads still work because they don't go through
+the sync stream.
+
+Filter the custom values out of sync emissions — see
+`AssetEditSync.getUpserts` in `server/src/repositories/sync.repository.ts`
+for the pattern. Any new `AssetEditAction.*` the fork adds needs a
+corresponding exclusion in that query.
+
+
 ## Public fork security posture
 
 This is a public repo. Before pushing:
