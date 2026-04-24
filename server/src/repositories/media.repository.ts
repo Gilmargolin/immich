@@ -7,7 +7,7 @@ import { Writable } from 'node:stream';
 import sharp from 'sharp';
 import { ORIENTATION_TO_SHARP_ROTATION } from 'src/constants';
 import { Exif } from 'src/database';
-import { AssetEditActionItem } from 'src/dtos/editing.dto';
+import { AdjustParameters, AssetEditActionItem } from 'src/dtos/editing.dto';
 import { Colorspace, LogLevel, RawExtractedFormat } from 'src/enum';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import {
@@ -41,6 +41,156 @@ type ProgressEvent = {
 export type ExtractResult = {
   buffer: Buffer;
   format: RawExtractedFormat;
+};
+
+// 8-bit sRGB → linear-light lookup. Built once per process.
+const SRGB_TO_LINEAR_LUT = ((): Float32Array => {
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const v = i / 255;
+    lut[i] = v <= 0.040_45 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  }
+  return lut;
+})();
+
+const linearToSrgb8 = (v: number): number => {
+  if (v <= 0) {
+    return 0;
+  }
+  if (v >= 1) {
+    return 255;
+  }
+  const s = v <= 0.003_130_8 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+  return Math.round(s * 255);
+};
+
+const smoothstep = (edge0: number, edge1: number, x: number): number => {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+};
+
+const isAdjustActive = (p: AdjustParameters): boolean =>
+  p.brightness !== 0 ||
+  p.contrast !== 0 ||
+  p.saturation !== 0 ||
+  p.warmth !== 0 ||
+  p.tint !== 0 ||
+  p.highlights !== 0 ||
+  p.shadows !== 0 ||
+  p.whitePoint !== 0 ||
+  p.blackPoint !== 0;
+
+// Per-channel contrast S-curve (positive) / flatten (negative) in linear space.
+// k in [-1, 1]. k > 0: cubic smoothstep toward extremes. k < 0: mix toward mid-gray.
+const applyContrast = (v: number, k: number): number => {
+  const clamped = v < 0 ? 0 : v > 1 ? 1 : v;
+  if (k >= 0) {
+    const s = clamped * clamped * (3 - 2 * clamped);
+    return clamped * (1 - k) + s * k;
+  }
+  return clamped * (1 + k) + 0.5 * -k;
+};
+
+// Apply color/lighting adjustments by materializing the pipeline to an 8-bit
+// sRGB raw buffer, doing per-pixel math in linear light (correct gamma), then
+// re-ingesting. This gives us:
+//   - channel-multiplier white balance for warmth/tint (matches web preview)
+//   - exposure-style brightness (multiplicative in linear)
+//   - range-selective highlights/shadows/whites/blacks via smooth luminance
+//     masks, applied as hue-preserving RGB scales
+//   - saturation and contrast in linear space so mid-tones don't get muddy
+const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters): Promise<sharp.Sharp> => {
+  const { data, info } = await pipeline.toColorspace('srgb').raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  if (channels < 3) {
+    return sharp(data, { raw: { width, height, channels } });
+  }
+
+  const out = Buffer.alloc(data.length);
+
+  // Slider → math constants. Slider range is [-1, 1] everywhere.
+  const exposureMult = params.brightness === 0 ? 1 : Math.pow(2, params.brightness * 2);
+  // Reciprocal pair for warmth keeps mid-luminance roughly stable while
+  // rotating R↔B, which is the Lightroom-style WB behavior.
+  const warmthR = 1 + params.warmth * 0.3;
+  const warmthB = 1 / (1 + params.warmth * 0.3);
+  const tintG = 1 + params.tint * 0.2;
+  const satMult = 1 + params.saturation;
+  const contrastK = params.contrast;
+  const highAmp = params.highlights * 0.25;
+  const shadAmp = params.shadows * 0.25;
+  const whiteAmp = params.whitePoint * 0.15;
+  const blackAmp = params.blackPoint * 0.15;
+
+  const hasWb = params.warmth !== 0 || params.tint !== 0;
+  const hasExposure = exposureMult !== 1;
+  const hasTonal =
+    params.highlights !== 0 || params.shadows !== 0 || params.whitePoint !== 0 || params.blackPoint !== 0;
+  const hasSat = params.saturation !== 0;
+  const hasContrast = params.contrast !== 0;
+
+  for (let i = 0; i < data.length; i += channels) {
+    let r = SRGB_TO_LINEAR_LUT[data[i]];
+    let g = SRGB_TO_LINEAR_LUT[data[i + 1]];
+    let b = SRGB_TO_LINEAR_LUT[data[i + 2]];
+
+    if (hasWb) {
+      r *= warmthR;
+      g *= tintG;
+      b *= warmthB;
+    }
+
+    if (hasExposure) {
+      r *= exposureMult;
+      g *= exposureMult;
+      b *= exposureMult;
+    }
+
+    if (hasTonal) {
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      const yClamped = y < 0 ? 0 : y > 1 ? 1 : y;
+      const highMask = smoothstep(0.5, 1, yClamped);
+      const shadMask = 1 - smoothstep(0, 0.5, yClamped);
+      const whiteMask = smoothstep(0.75, 1, yClamped);
+      const blackMask = 1 - smoothstep(0, 0.25, yClamped);
+      const deltaY = highAmp * highMask + shadAmp * shadMask + whiteAmp * whiteMask + blackAmp * blackMask;
+
+      if (deltaY !== 0) {
+        if (y > 0.001) {
+          const scale = (y + deltaY) / y;
+          r *= scale;
+          g *= scale;
+          b *= scale;
+        } else {
+          r += deltaY;
+          g += deltaY;
+          b += deltaY;
+        }
+      }
+    }
+
+    if (hasSat) {
+      const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      r = y + (r - y) * satMult;
+      g = y + (g - y) * satMult;
+      b = y + (b - y) * satMult;
+    }
+
+    if (hasContrast) {
+      r = applyContrast(r, contrastK);
+      g = applyContrast(g, contrastK);
+      b = applyContrast(b, contrastK);
+    }
+
+    out[i] = linearToSrgb8(r);
+    out[i + 1] = linearToSrgb8(g);
+    out[i + 2] = linearToSrgb8(b);
+    if (channels === 4) {
+      out[i + 3] = data[i + 3];
+    }
+  }
+
+  return sharp(out, { raw: { width, height, channels } });
 };
 
 @Injectable()
@@ -227,74 +377,8 @@ export class MediaRepository {
     }
 
     // 4. Apply color/lighting adjustments
-    if (adjustEdit) {
-      const params = adjustEdit.parameters;
-      const modulate: { brightness?: number; saturation?: number; hue?: number } = {};
-
-      // Brightness: Sharp modulate uses multiplier (1 = unchanged, >1 brighter, <1 darker)
-      if (params.brightness !== 0) {
-        modulate.brightness = 1 + params.brightness;
-      }
-
-      // Saturation: Sharp modulate uses multiplier (1 = unchanged, >1 more saturated, 0 = greyscale)
-      if (params.saturation !== 0) {
-        modulate.saturation = 1 + params.saturation;
-      }
-
-      // Warmth: shift hue slightly (positive = warmer/yellow, negative = cooler/blue)
-      if (params.warmth !== 0) {
-        modulate.hue = Math.round(params.warmth * 30);
-      }
-
-      if (Object.keys(modulate).length > 0) {
-        pipeline = pipeline.modulate(modulate);
-      }
-
-      // Contrast: use linear transform (a * pixel + b)
-      if (params.contrast !== 0) {
-        const factor = 1 + params.contrast;
-        const offset = 128 * (1 - factor);
-        pipeline = pipeline.linear(factor, offset);
-      }
-
-      // Tint: apply a subtle color tint via tint()
-      if (params.tint !== 0) {
-        const tintValue = params.tint;
-        // Positive = green tint, negative = magenta tint
-        const r = tintValue < 0 ? 255 : Math.round(255 - tintValue * 40);
-        const g = tintValue > 0 ? 255 : Math.round(255 + tintValue * 40);
-        const b = tintValue < 0 ? 255 : Math.round(255 - tintValue * 40);
-        pipeline = pipeline.tint({ r, g, b });
-      }
-
-      // Highlights: brighten/darken light areas
-      if (params.highlights !== 0) {
-        if (params.highlights > 0) {
-          // Brighten highlights: use output-only gamma (input gamma=1.0, output gamma>1)
-          const gammaOut = 1 + params.highlights * 1.5;
-          pipeline = pipeline.gamma(1.0, Math.min(3.0, gammaOut));
-        } else {
-          // Darken highlights: reduce slope
-          const factor = 1 + params.highlights * 0.4;
-          pipeline = pipeline.linear(factor, 0);
-        }
-      }
-
-      // Shadows: lift dark areas using linear offset
-      if (params.shadows !== 0) {
-        pipeline = pipeline.linear(1 - params.shadows * 0.15, params.shadows * 40);
-      }
-
-      // White point: scale maximum brightness
-      if (params.whitePoint !== 0) {
-        const scale = 1 + params.whitePoint * 0.5;
-        pipeline = pipeline.linear(scale, 0);
-      }
-
-      // Black point: raise the floor of dark pixels
-      if (params.blackPoint !== 0) {
-        pipeline = pipeline.linear(1, params.blackPoint * 50);
-      }
+    if (adjustEdit && isAdjustActive(adjustEdit.parameters)) {
+      pipeline = await applyAdjustments(pipeline, adjustEdit.parameters);
     }
 
     return pipeline;

@@ -424,36 +424,32 @@ describe(MediaRepository.name, () => {
       expect(avg.g).toBeLessThan(100);
     });
 
-    it('should shift warmth (hue shift)', async () => {
-      const imageBuffer = await sharp({
-        create: { width: 100, height: 100, channels: 3, background: { r: 200, g: 100, b: 100 } },
-      })
-        .png()
-        .toBuffer();
-      const result = await sut['applyEdits'](sharp(imageBuffer), [
-        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, warmth: 1.0 } },
-      ]);
-
-      const buffer = await result.png().toBuffer();
-      const avg = await getAverageColor(buffer);
-      // Warmth shifts hue; the exact output depends on Sharp's modulate, but colors should change
-      const origAvg = await getAverageColor(imageBuffer);
-      expect(avg.r !== origAvg.r || avg.g !== origAvg.g || avg.b !== origAvg.b).toBe(true);
-    });
-
-    it('should apply highlights adjustment', async () => {
-      const imageBuffer = await buildGrayImage(100);
+    it('should brighten highlights on a bright image', async () => {
+      // Bright base (sRGB 220) lies inside the highlights mask range (>0.5 linear).
+      const imageBuffer = await buildGrayImage(220);
       const result = await sut['applyEdits'](sharp(imageBuffer), [
         { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, highlights: 0.5 } },
       ]);
 
       const buffer = await result.png().toBuffer();
       const avg = await getAverageColor(buffer);
-      // Gamma > 1 brightens midtones
-      expect(avg.r).toBeGreaterThan(100);
+      expect(avg.r).toBeGreaterThan(220);
     });
 
-    it('should apply shadows adjustment', async () => {
+    it('should leave mid-tones alone when only highlights is adjusted', async () => {
+      // sRGB 128 ≈ 0.216 linear — below the highlights mask threshold,
+      // so highlights should barely touch it (range-selective).
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, highlights: 1 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(Math.abs(avg.r - 128)).toBeLessThan(5);
+    });
+
+    it('should lift shadows on a dark image', async () => {
       const imageBuffer = await buildGrayImage(50);
       const result = await sut['applyEdits'](sharp(imageBuffer), [
         { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, shadows: 0.5 } },
@@ -461,23 +457,35 @@ describe(MediaRepository.name, () => {
 
       const buffer = await result.png().toBuffer();
       const avg = await getAverageColor(buffer);
-      // Shadows lifts dark areas
       expect(avg.r).toBeGreaterThan(50);
     });
 
-    it('should apply white point adjustment', async () => {
-      const imageBuffer = await buildGrayImage(128);
+    it('should leave highlights alone when only shadows is adjusted', async () => {
+      // sRGB 230 ≈ 0.79 linear — above the shadows mask range, so shadows
+      // should be near-zero here.
+      const imageBuffer = await buildGrayImage(230);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, shadows: 1 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(Math.abs(avg.r - 230)).toBeLessThan(5);
+    });
+
+    it('should apply white point adjustment on a near-white image', async () => {
+      // Whites mask kicks in above 0.75 linear (~sRGB 225).
+      const imageBuffer = await buildGrayImage(240);
       const result = await sut['applyEdits'](sharp(imageBuffer), [
         { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, whitePoint: 0.5 } },
       ]);
 
       const buffer = await result.png().toBuffer();
       const avg = await getAverageColor(buffer);
-      // White point scales brightness up
-      expect(avg.r).toBeGreaterThan(150);
+      expect(avg.r).toBeGreaterThan(240);
     });
 
-    it('should apply black point adjustment', async () => {
+    it('should apply black point adjustment on a near-black image', async () => {
       const imageBuffer = await buildGrayImage(10);
       const result = await sut['applyEdits'](sharp(imageBuffer), [
         { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, blackPoint: 0.5 } },
@@ -485,8 +493,39 @@ describe(MediaRepository.name, () => {
 
       const buffer = await result.png().toBuffer();
       const avg = await getAverageColor(buffer);
-      // Black point raises the floor
       expect(avg.r).toBeGreaterThan(20);
+    });
+
+    it('should apply warmth as R/B channel shift (warmer = more red, less blue)', async () => {
+      const imageBuffer = await sharp({
+        create: { width: 100, height: 100, channels: 3, background: { r: 150, g: 150, b: 150 } },
+      })
+        .png()
+        .toBuffer();
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, warmth: 0.6 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(avg.r).toBeGreaterThan(150);
+      expect(avg.b).toBeLessThan(150);
+    });
+
+    it('should apply tint as G channel shift (positive = greener)', async () => {
+      const imageBuffer = await sharp({
+        create: { width: 100, height: 100, channels: 3, background: { r: 150, g: 150, b: 150 } },
+      })
+        .png()
+        .toBuffer();
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, tint: 0.5 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(avg.g).toBeGreaterThan(avg.r);
+      expect(avg.g).toBeGreaterThan(avg.b);
     });
 
     it('should combine adjust with crop and rotate', async () => {
