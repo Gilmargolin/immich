@@ -543,6 +543,7 @@ where
   "asset_edit"."updateId" < $1
   and "asset_edit"."updateId" > $2
   and "asset"."ownerId" = $3
+  and "asset_edit"."action" != $4
 order by
   "asset_edit"."updateId" asc
 
