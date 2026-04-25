@@ -297,10 +297,14 @@
           type="button"
           class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
             {adjustManager.pendingMaskKind === 'linear' ? 'bg-immich-primary text-black' : 'text-gray-300 hover:text-white'}"
-          onclick={() =>
-            adjustManager.pendingMaskKind === 'linear'
-              ? adjustManager.cancelDrawingMask()
-              : adjustManager.startDrawingMask('linear')}
+          onclick={() => {
+            if (adjustManager.pendingMaskKind === 'linear') {
+              adjustManager.cancelDrawingMask();
+            } else {
+              exitCropMode();
+              adjustManager.startDrawingMask('linear');
+            }
+          }}
           disabled={adjustManager.masks.length >= 8}
           aria-label="Draw linear gradient mask"
           title="Click, then drag on the photo to define the gradient"
@@ -312,10 +316,14 @@
           type="button"
           class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
             {adjustManager.pendingMaskKind === 'radial' ? 'bg-immich-primary text-black' : 'text-gray-300 hover:text-white'}"
-          onclick={() =>
-            adjustManager.pendingMaskKind === 'radial'
-              ? adjustManager.cancelDrawingMask()
-              : adjustManager.startDrawingMask('radial')}
+          onclick={() => {
+            if (adjustManager.pendingMaskKind === 'radial') {
+              adjustManager.cancelDrawingMask();
+            } else {
+              exitCropMode();
+              adjustManager.startDrawingMask('radial');
+            }
+          }}
           disabled={adjustManager.masks.length >= 8}
           aria-label="Draw radial mask"
           title="Click, then drag on the photo from center outward"
@@ -348,7 +356,10 @@
                 {adjustManager.selectedMaskIndex === i
                   ? 'bg-immich-primary text-black'
                   : 'text-gray-300 hover:bg-gray-700'}"
-              onclick={() => adjustManager.selectMask(i)}
+              onclick={() => {
+              exitCropMode();
+              adjustManager.selectMask(i);
+            }}
             >
               <span>{maskLabel(mask, i)}</span>
             </button>
