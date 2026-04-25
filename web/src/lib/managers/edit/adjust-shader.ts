@@ -1,0 +1,193 @@
+// Vertex + fragment shader for the live adjust preview.
+//
+// IMPORTANT: keep the math in lockstep with `applyAdjustments` in
+// `server/src/repositories/media.repository.ts`. If you change a formula
+// here, update the server copy too — otherwise the preview drifts from
+// what `save` produces and users see the photo "jump" on save.
+//
+// This is GLSL ES 3.00 (WebGL 2). Branchless where it would help; explicit
+// `if` blocks where the ops are expensive enough that gating them helps.
+
+export const VERTEX_SHADER = /* glsl */ `#version 300 es
+in vec2 a_position;
+in vec2 a_texCoord;
+out vec2 v_texCoord;
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+  v_texCoord = a_texCoord;
+}
+`;
+
+// Mask data is packed into uniform arrays so we don't need WebGL2 struct
+// arrays (which work but are awkward to set from JS via uniformXX calls).
+//
+// For each mask slot i in [0, MAX_MASKS):
+//   u_maskKind[i]        : 0 = linear, 1 = radial (only matters for i < u_maskCount)
+//   u_maskGeomA[i]       : linear → (ax, ay, bx, by) all normalized [0,1]
+//                          radial → (cx, cy, rx, ry); cx/cy normalized to W/H,
+//                                    rx/ry normalized to min(W, H)
+//   u_maskGeomB[i]       : linear → unused
+//                          radial → (angleDeg, feather, invert?1:0, _)
+//   u_maskSliders0[i]    : (brightness, contrast, saturation, warmth)
+//   u_maskSliders1[i]    : (tint, highlights, shadows, whitePoint)
+//   u_maskBlackPoint[i]  : blackPoint
+export const FRAGMENT_SHADER = /* glsl */ `#version 300 es
+precision highp float;
+
+in vec2 v_texCoord;
+out vec4 outColor;
+
+uniform sampler2D u_image;
+uniform vec2 u_imageSize;
+
+// Global sliders (same nine fields as AdjustmentSliders)
+uniform float u_brightness;
+uniform float u_contrast;
+uniform float u_saturation;
+uniform float u_warmth;
+uniform float u_tint;
+uniform float u_highlights;
+uniform float u_shadows;
+uniform float u_whitePoint;
+uniform float u_blackPoint;
+
+// Local masks
+const int MAX_MASKS = 8;
+uniform int u_maskCount;
+uniform int u_maskKind[MAX_MASKS];
+uniform vec4 u_maskGeomA[MAX_MASKS];
+uniform vec4 u_maskGeomB[MAX_MASKS];
+uniform vec4 u_maskSliders0[MAX_MASKS];
+uniform vec4 u_maskSliders1[MAX_MASKS];
+uniform float u_maskBlackPoint[MAX_MASKS];
+
+float smoothStepF(float edge0, float edge1, float x) {
+  float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
+vec3 srgbToLinear(vec3 c) {
+  vec3 cutoff = step(vec3(0.04045), c);
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(lo, hi, cutoff);
+}
+
+vec3 linearToSrgb(vec3 c) {
+  c = clamp(c, vec3(0.0), vec3(1.0));
+  vec3 cutoff = step(vec3(0.0031308), c);
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, cutoff);
+}
+
+float applyContrastChannel(float v, float k) {
+  v = clamp(v, 0.0, 1.0);
+  if (k >= 0.0) {
+    float s = v * v * (3.0 - 2.0 * v);
+    return v * (1.0 - k) + s * k;
+  }
+  return v * (1.0 + k) + 0.5 * (-k);
+}
+
+// Apply the same nine-slider math the server does. Mirrors
+// applyPrecomputedSliders in media.repository.ts.
+vec3 applySliders(
+  vec3 rgb,
+  float brightness, float contrast, float saturation, float warmth,
+  float tint, float highlights, float shadows, float whitePoint, float blackPoint
+) {
+  if (warmth != 0.0 || tint != 0.0) {
+    rgb.r *= 1.0 + warmth * 0.3;
+    rgb.b /= 1.0 + warmth * 0.3;
+    rgb.g *= 1.0 + tint * 0.2;
+  }
+  if (brightness != 0.0) {
+    rgb *= pow(2.0, brightness * 2.0);
+  }
+  if (highlights != 0.0 || shadows != 0.0 || whitePoint != 0.0 || blackPoint != 0.0) {
+    float y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float yc = clamp(y, 0.0, 1.0);
+    float highMask = smoothStepF(0.5, 1.0, yc);
+    float shadMask = 1.0 - smoothStepF(0.0, 0.5, yc);
+    float whiteMask = smoothStepF(0.75, 1.0, yc);
+    float blackMask = 1.0 - smoothStepF(0.0, 0.25, yc);
+    float dy = highlights * 0.25 * highMask
+             + shadows * 0.25 * shadMask
+             + whitePoint * 0.15 * whiteMask
+             + blackPoint * 0.15 * blackMask;
+    if (dy != 0.0) {
+      if (y > 0.001) {
+        rgb *= (y + dy) / y;
+      } else {
+        rgb += vec3(dy);
+      }
+    }
+  }
+  if (saturation != 0.0) {
+    float y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    rgb = vec3(y) + (rgb - vec3(y)) * (1.0 + saturation);
+  }
+  if (contrast != 0.0) {
+    rgb.r = applyContrastChannel(rgb.r, contrast);
+    rgb.g = applyContrastChannel(rgb.g, contrast);
+    rgb.b = applyContrastChannel(rgb.b, contrast);
+  }
+  return rgb;
+}
+
+// Per-pixel mask weight in [0, 1]. Mirrors precomputeMask in
+// media.repository.ts. px is in pixel space.
+float maskWeight(int idx, vec2 px) {
+  if (u_maskKind[idx] == 0) {
+    vec2 a = u_maskGeomA[idx].xy * u_imageSize;
+    vec2 b = u_maskGeomA[idx].zw * u_imageSize;
+    vec2 v = b - a;
+    float lenSq = dot(v, v);
+    if (lenSq < 1e-6) return 0.0;
+    float t = clamp(dot(px - a, v) / lenSq, 0.0, 1.0);
+    return 1.0 - t * t * (3.0 - 2.0 * t);
+  }
+  float minDim = min(u_imageSize.x, u_imageSize.y);
+  vec2 c = u_maskGeomA[idx].xy * u_imageSize;
+  float rx = max(1.0, u_maskGeomA[idx].z * minDim);
+  float ry = max(1.0, u_maskGeomA[idx].w * minDim);
+  float angleDeg = u_maskGeomB[idx].x;
+  float feather = u_maskGeomB[idx].y;
+  bool invert = u_maskGeomB[idx].z > 0.5;
+  float rad = -angleDeg * 3.14159265358979323846 / 180.0;
+  float cosA = cos(rad);
+  float sinA = sin(rad);
+  vec2 d = px - c;
+  vec2 dr = vec2(d.x * cosA - d.y * sinA, d.x * sinA + d.y * cosA);
+  float dist = length(vec2(dr.x / rx, dr.y / ry));
+  float fs = max(0.0, 1.0 - max(0.001, feather));
+  float w = 1.0 - smoothStepF(fs, 1.0, dist);
+  return invert ? 1.0 - w : w;
+}
+
+void main() {
+  vec4 srcRgba = texture(u_image, v_texCoord);
+  vec3 lin = srgbToLinear(srcRgba.rgb);
+
+  lin = applySliders(
+    lin,
+    u_brightness, u_contrast, u_saturation, u_warmth,
+    u_tint, u_highlights, u_shadows, u_whitePoint, u_blackPoint
+  );
+
+  vec2 px = v_texCoord * u_imageSize;
+  for (int i = 0; i < MAX_MASKS; ++i) {
+    if (i >= u_maskCount) break;
+    float w = maskWeight(i, px);
+    if (w > 0.0) {
+      vec4 s0 = u_maskSliders0[i];
+      vec4 s1 = u_maskSliders1[i];
+      vec3 masked = applySliders(lin, s0.x, s0.y, s0.z, s0.w, s1.x, s1.y, s1.z, s1.w, u_maskBlackPoint[i]);
+      lin = mix(lin, masked, w);
+    }
+  }
+
+  outColor = vec4(linearToSrgb(lin), srcRgba.a);
+}
+`;

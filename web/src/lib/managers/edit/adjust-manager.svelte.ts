@@ -1,4 +1,5 @@
 import type { EditAction, EditActions, EditToolManager } from '$lib/managers/edit/edit-manager.svelte';
+import type { LocalMask } from '$lib/managers/edit/adjust-webgl';
 import type { AssetResponseDto } from '@immich/sdk';
 
 export interface AdjustmentValues {
@@ -13,6 +14,8 @@ export interface AdjustmentValues {
   blackPoint: number;
 }
 
+export type { LocalMask } from '$lib/managers/edit/adjust-webgl';
+
 const defaultValues: AdjustmentValues = {
   brightness: 0,
   contrast: 0,
@@ -25,9 +28,22 @@ const defaultValues: AdjustmentValues = {
   blackPoint: 0,
 };
 
+const slidersActive = (v: AdjustmentValues): boolean =>
+  v.brightness !== 0 ||
+  v.contrast !== 0 ||
+  v.saturation !== 0 ||
+  v.warmth !== 0 ||
+  v.tint !== 0 ||
+  v.highlights !== 0 ||
+  v.shadows !== 0 ||
+  v.whitePoint !== 0 ||
+  v.blackPoint !== 0;
+
 export class AdjustManager implements EditToolManager {
   values = $state<AdjustmentValues>({ ...defaultValues });
+  masks = $state<LocalMask[]>([]);
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
+  private initialMasks = $state<LocalMask[]>([]);
 
   hasChanges = $derived(
     this.values.brightness !== this.initialValues.brightness ||
@@ -38,43 +54,23 @@ export class AdjustManager implements EditToolManager {
       this.values.highlights !== this.initialValues.highlights ||
       this.values.shadows !== this.initialValues.shadows ||
       this.values.whitePoint !== this.initialValues.whitePoint ||
-      this.values.blackPoint !== this.initialValues.blackPoint,
+      this.values.blackPoint !== this.initialValues.blackPoint ||
+      JSON.stringify(this.masks) !== JSON.stringify(this.initialMasks),
   );
 
-  canReset = $derived(
-    this.values.brightness !== 0 ||
-      this.values.contrast !== 0 ||
-      this.values.saturation !== 0 ||
-      this.values.warmth !== 0 ||
-      this.values.tint !== 0 ||
-      this.values.highlights !== 0 ||
-      this.values.shadows !== 0 ||
-      this.values.whitePoint !== 0 ||
-      this.values.blackPoint !== 0,
-  );
+  canReset = $derived(slidersActive(this.values) || this.masks.length > 0);
 
   edits = $derived.by((): EditAction[] => {
-    const hasAnyAdjustment =
-      this.values.brightness !== 0 ||
-      this.values.contrast !== 0 ||
-      this.values.saturation !== 0 ||
-      this.values.warmth !== 0 ||
-      this.values.tint !== 0 ||
-      this.values.highlights !== 0 ||
-      this.values.shadows !== 0 ||
-      this.values.whitePoint !== 0 ||
-      this.values.blackPoint !== 0;
-
-    if (!hasAnyAdjustment) {
+    if (!slidersActive(this.values) && this.masks.length === 0) {
       return [];
     }
 
-    return [
-      {
-        action: 'adjust' as const,
-        parameters: { ...this.values },
-      },
-    ];
+    const parameters: AdjustmentValues & { masks?: LocalMask[] } = { ...this.values };
+    if (this.masks.length > 0) {
+      parameters.masks = [...this.masks];
+    }
+
+    return [{ action: 'adjust' as const, parameters }];
   });
 
   /**
@@ -149,12 +145,17 @@ export class AdjustManager implements EditToolManager {
   async onActivate(_asset: AssetResponseDto, edits: EditActions): Promise<void> {
     const adjustEdit = edits.find((edit) => edit.action === 'adjust');
     if (adjustEdit) {
-      const params = adjustEdit.parameters as AdjustmentValues;
-      this.values = { ...params };
-      this.initialValues = { ...params };
+      const params = adjustEdit.parameters as AdjustmentValues & { masks?: LocalMask[] };
+      const { masks, ...sliders } = params;
+      this.values = { ...sliders };
+      this.initialValues = { ...sliders };
+      this.masks = masks ? [...masks] : [];
+      this.initialMasks = masks ? [...masks] : [];
     } else {
       this.values = { ...defaultValues };
       this.initialValues = { ...defaultValues };
+      this.masks = [];
+      this.initialMasks = [];
     }
   }
 
@@ -165,10 +166,24 @@ export class AdjustManager implements EditToolManager {
   async resetAllChanges(): Promise<void> {
     this.values = { ...defaultValues };
     this.initialValues = { ...defaultValues };
+    this.masks = [];
+    this.initialMasks = [];
   }
 
   setValue(key: keyof AdjustmentValues, value: number) {
     this.values = { ...this.values, [key]: value };
+  }
+
+  addMask(mask: LocalMask): void {
+    this.masks = [...this.masks, mask];
+  }
+
+  removeMask(index: number): void {
+    this.masks = this.masks.filter((_, i) => i !== index);
+  }
+
+  updateMask(index: number, mask: LocalMask): void {
+    this.masks = this.masks.map((m, i) => (i === index ? mask : m));
   }
 }
 
