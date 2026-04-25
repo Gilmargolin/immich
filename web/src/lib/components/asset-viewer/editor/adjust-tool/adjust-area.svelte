@@ -1,5 +1,6 @@
 <script lang="ts">
   import AdjustCanvasPreview from '$lib/components/asset-viewer/editor/adjust-tool/adjust-canvas-preview.svelte';
+  import MaskOverlay from '$lib/components/asset-viewer/editor/adjust-tool/mask-overlay.svelte';
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import { getAssetMediaUrl } from '$lib/utils';
   import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
@@ -55,7 +56,9 @@
 
 <div class="flex h-full w-full items-center justify-center">
   {#if !useFallback}
-    <AdjustCanvasPreview src={imageUrl} onWebglUnavailable={() => (useFallback = true)} />
+    <AdjustCanvasPreview src={imageUrl} onWebglUnavailable={() => (useFallback = true)}>
+      <MaskOverlay />
+    </AdjustCanvasPreview>
   {:else}
     <svg class="absolute" width="0" height="0">
       <defs>

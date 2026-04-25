@@ -39,11 +39,45 @@ const slidersActive = (v: AdjustmentValues): boolean =>
   v.whitePoint !== 0 ||
   v.blackPoint !== 0;
 
+// Defaults for newly-added masks. Centered, ~30% of image dimensions, no
+// adjustments yet — the user picks sliders after creation.
+const defaultLinearMask = (): LocalMask => ({
+  kind: 'linear',
+  ax: 0.5,
+  ay: 0.2,
+  bx: 0.5,
+  by: 0.6,
+  params: { ...defaultValues },
+});
+
+const defaultRadialMask = (): LocalMask => ({
+  kind: 'radial',
+  cx: 0.5,
+  cy: 0.5,
+  rx: 0.25,
+  ry: 0.25,
+  angle: 0,
+  feather: 0.2,
+  invert: false,
+  params: { ...defaultValues },
+});
+
 export class AdjustManager implements EditToolManager {
   values = $state<AdjustmentValues>({ ...defaultValues });
   masks = $state<LocalMask[]>([]);
+  // null = editing globals; index = editing that mask's params via the slider panel.
+  selectedMaskIndex = $state<number | null>(null);
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
   private initialMasks = $state<LocalMask[]>([]);
+
+  // Sliders panel binding: when a mask is selected, the panel reads/writes
+  // its params; otherwise it reads/writes the global values.
+  activeSliders = $derived.by((): AdjustmentValues => {
+    if (this.selectedMaskIndex !== null && this.masks[this.selectedMaskIndex]) {
+      return this.masks[this.selectedMaskIndex].params;
+    }
+    return this.values;
+  });
 
   hasChanges = $derived(
     this.values.brightness !== this.initialValues.brightness ||
@@ -143,6 +177,7 @@ export class AdjustManager implements EditToolManager {
   });
 
   async onActivate(_asset: AssetResponseDto, edits: EditActions): Promise<void> {
+    this.selectedMaskIndex = null;
     const adjustEdit = edits.find((edit) => edit.action === 'adjust');
     if (adjustEdit) {
       const params = adjustEdit.parameters as AdjustmentValues & { masks?: LocalMask[] };
@@ -168,22 +203,52 @@ export class AdjustManager implements EditToolManager {
     this.initialValues = { ...defaultValues };
     this.masks = [];
     this.initialMasks = [];
+    this.selectedMaskIndex = null;
   }
 
   setValue(key: keyof AdjustmentValues, value: number) {
+    if (this.selectedMaskIndex !== null && this.masks[this.selectedMaskIndex]) {
+      const idx = this.selectedMaskIndex;
+      this.masks = this.masks.map((m, i) =>
+        i === idx ? ({ ...m, params: { ...m.params, [key]: value } } as LocalMask) : m,
+      );
+      return;
+    }
     this.values = { ...this.values, [key]: value };
   }
 
-  addMask(mask: LocalMask): void {
-    this.masks = [...this.masks, mask];
+  addLinearMask(): void {
+    this.masks = [...this.masks, defaultLinearMask()];
+    this.selectedMaskIndex = this.masks.length - 1;
+  }
+
+  addRadialMask(): void {
+    this.masks = [...this.masks, defaultRadialMask()];
+    this.selectedMaskIndex = this.masks.length - 1;
   }
 
   removeMask(index: number): void {
     this.masks = this.masks.filter((_, i) => i !== index);
+    if (this.selectedMaskIndex === index) {
+      this.selectedMaskIndex = null;
+    } else if (this.selectedMaskIndex !== null && this.selectedMaskIndex > index) {
+      this.selectedMaskIndex -= 1;
+    }
   }
 
   updateMask(index: number, mask: LocalMask): void {
     this.masks = this.masks.map((m, i) => (i === index ? mask : m));
+  }
+
+  selectMask(index: number | null): void {
+    if (index === null) {
+      this.selectedMaskIndex = null;
+      return;
+    }
+    if (index < 0 || index >= this.masks.length) {
+      return;
+    }
+    this.selectedMaskIndex = index;
   }
 }
 

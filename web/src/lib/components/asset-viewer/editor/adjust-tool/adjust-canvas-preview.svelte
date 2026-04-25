@@ -1,18 +1,22 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import { AdjustGLRenderer } from '$lib/managers/edit/adjust-webgl';
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, type Snippet } from 'svelte';
 
   interface Props {
     src: string;
     onWebglUnavailable?: () => void;
+    children?: Snippet;
   }
 
-  let { src, onWebglUnavailable }: Props = $props();
+  let { src, onWebglUnavailable, children }: Props = $props();
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let renderer: AdjustGLRenderer | null = null;
   let imageLoaded = $state(false);
+  // Image aspect ratio (W/H). Used so the canvas+overlay wrapper sizes to the
+  // image's aspect within the available area (object-contain semantics).
+  let aspectRatio = $state(1);
 
   // The current image element kept around so we can re-upload to the texture
   // if WebGL state ever needs to be rebuilt (e.g. context loss).
@@ -52,6 +56,7 @@
         return;
       }
       img = el;
+      aspectRatio = el.naturalWidth / Math.max(1, el.naturalHeight);
       renderer.setImage(el);
       renderer.resizeCanvas();
       imageLoaded = true;
@@ -114,8 +119,24 @@
   });
 </script>
 
-<canvas
-  bind:this={canvas}
-  class="max-h-full max-w-full object-contain"
-  aria-label="Adjust preview"
-></canvas>
+<div class="relative flex h-full w-full items-center justify-center">
+  <!--
+    Inner wrapper sized to the image's aspect ratio within the available area
+    (max-h/max-w + aspect-ratio = "object-contain" for a div). Canvas fills
+    the wrapper; the children slot is layered on top at the same dimensions
+    so the mask overlay lands exactly on top of the rendered image.
+  -->
+  <div
+    class="relative"
+    style="max-width: 100%; max-height: 100%; aspect-ratio: {aspectRatio}; width: 100%; height: 100%;"
+  >
+    <canvas
+      bind:this={canvas}
+      class="absolute inset-0 h-full w-full"
+      aria-label="Adjust preview"
+    ></canvas>
+    {#if children}
+      {@render children()}
+    {/if}
+  </div>
+</div>
