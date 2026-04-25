@@ -1,7 +1,6 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import { AdjustGLRenderer, FULL_CROP, type CropRect } from '$lib/managers/edit/adjust-webgl';
-  import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { onDestroy, onMount, type Snippet } from 'svelte';
 
   interface Props {
@@ -21,28 +20,15 @@
 
   let img = $state<HTMLImageElement | null>(null);
 
-  // Pending crop, expressed in texture UV [0,1]. Read from transformManager:
-  // its `region` is in displayed-image coords (cropImageSize × cropImageScale),
-  // so dividing by displayedImage{Width,Height} gives the UV. When the user
-  // hasn't cropped yet, the region equals the full displayed image and this
-  // collapses to FULL_CROP.
-  let cropRect = $derived.by((): CropRect => {
-    const dw = transformManager.displayedImageWidth;
-    const dh = transformManager.displayedImageHeight;
-    if (dw < 1 || dh < 1) {
-      return FULL_CROP;
-    }
-    const r = transformManager.region;
-    const u0 = Math.max(0, Math.min(1, r.x / dw));
-    const v0 = Math.max(0, Math.min(1, r.y / dh));
-    const u1 = Math.max(0, Math.min(1, (r.x + r.width) / dw));
-    const v1 = Math.max(0, Math.min(1, (r.y + r.height) / dh));
-    // Tiny default region (100x100 from initial state) → treat as full crop.
-    if (u1 - u0 < 0.01 || v1 - v0 < 0.01) {
-      return FULL_CROP;
-    }
-    return { u0, v0, u1, v1 };
-  });
+  // Crop is intentionally NOT applied to the live preview (was tried in
+  // iter2 — caused the photo to "resize" when switching modes because crop
+  // mode shows full image while shader-cropped adjust mode shows only the
+  // kept region). Both modes now show the full preview at the same scale.
+  // Crop is still applied server-side on save; mask coords are stored as
+  // post-crop normalized (the DTO contract), which is correct in the no-crop
+  // case (post-crop == full image) and acceptable for now in the cropped
+  // case (mask placement may shift after save — to revisit).
+  const cropRect: CropRect = FULL_CROP;
 
   $effect(() => {
     if (!canvas) {
@@ -76,13 +62,8 @@
       }
       img = el;
       renderer.setImage(el);
-      // Initial sizing — gets refined by the cropRect effect below once
-      // the renderer + image are both in.
       renderer.resizeCanvas(cropRect);
-      const c = cropRect;
-      const cropW = (c.u1 - c.u0) * el.naturalWidth;
-      const cropH = (c.v1 - c.v0) * el.naturalHeight;
-      aspectRatio = cropW / Math.max(1, cropH);
+      aspectRatio = el.naturalWidth / Math.max(1, el.naturalHeight);
       imageLoaded = true;
       scheduleRender();
     };
@@ -95,20 +76,6 @@
     return () => {
       cancelled = true;
     };
-  });
-
-  // When the crop changes (user re-crops then comes back to mask mode),
-  // resize the canvas + update aspect-ratio + re-render.
-  $effect(() => {
-    const c = cropRect;
-    if (!renderer || !imageLoaded || !img) {
-      return;
-    }
-    renderer.resizeCanvas(c);
-    const cropW = (c.u1 - c.u0) * img.naturalWidth;
-    const cropH = (c.v1 - c.v0) * img.naturalHeight;
-    aspectRatio = cropW / Math.max(1, cropH);
-    scheduleRender();
   });
 
   let pendingRaf: number | null = null;
