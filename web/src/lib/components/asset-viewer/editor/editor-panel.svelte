@@ -2,11 +2,21 @@
   import { shortcuts } from '$lib/actions/shortcut';
   import { editManager, EditToolType } from '$lib/managers/edit/edit-manager.svelte';
   import { adjustManager, type AdjustmentValues } from '$lib/managers/edit/adjust-manager.svelte';
+  import { editsClipboard } from '$lib/managers/edit/edits-clipboard.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { websocketEvents } from '$lib/stores/websocket';
   import { getAssetEdits, type AssetResponseDto } from '@immich/sdk';
-  import { Button, HStack, IconButton } from '@immich/ui';
-  import { mdiClose, mdiFlipHorizontal, mdiFlipVertical, mdiRotateLeft, mdiRotateRight } from '@mdi/js';
+  import { Button, HStack, Icon, IconButton, toastManager } from '@immich/ui';
+  import {
+    mdiClose,
+    mdiContentCopy,
+    mdiDelete,
+    mdiFlipHorizontal,
+    mdiFlipVertical,
+    mdiGradientHorizontal,
+    mdiRotateLeft,
+    mdiRotateRight,
+  } from '@mdi/js';
   import {
     mdiBrightness6,
     mdiContrastCircle,
@@ -55,6 +65,14 @@
       onClose();
     }
   }
+
+  function copyAdjustments() {
+    editsClipboard.copy(asset.id, adjustManager.edits);
+    toastManager.primary('Adjustments copied — multi-select photos to paste them.');
+  }
+
+  const maskLabel = (mask: { kind: 'linear' | 'radial' }, i: number): string =>
+    `${mask.kind === 'linear' ? 'Linear' : 'Radial'} mask ${i + 1}`;
 
   async function closeEditor() {
     if (await editManager.closeConfirm()) {
@@ -181,7 +199,20 @@
       />
       <p class="text-lg text-immich-fg dark:text-immich-dark-fg capitalize">{$t('editor')}</p>
     </HStack>
-    <Button shape="round" size="small" onclick={applyEdits} loading={editManager.isApplyingEdits}>{$t('save')}</Button>
+    <HStack class="gap-1">
+      <IconButton
+        shape="round"
+        size="small"
+        variant="ghost"
+        color="secondary"
+        icon={mdiContentCopy}
+        aria-label="Copy adjustments to clipboard"
+        title="Copy adjustments (paste to multi-selected images)"
+        onclick={copyAdjustments}
+        disabled={adjustManager.edits.length === 0}
+      />
+      <Button shape="round" size="small" onclick={applyEdits} loading={editManager.isApplyingEdits}>{$t('save')}</Button>
+    </HStack>
   </HStack>
 
   <div class="flex-1 overflow-y-auto px-3 mt-2">
@@ -258,13 +289,83 @@
     <!-- Divider -->
     <hr class="border-gray-700 my-3" />
 
+    <!-- Local masks -->
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide">Masks</h2>
+      <div class="flex gap-1">
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-gray-300 hover:text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          onclick={() => adjustManager.addLinearMask()}
+          disabled={adjustManager.masks.length >= 8}
+          aria-label="Add linear gradient mask"
+        >
+          <Icon icon={mdiGradientHorizontal} size="14" />
+          <span>Linear</span>
+        </button>
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-gray-300 hover:text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          onclick={() => adjustManager.addRadialMask()}
+          disabled={adjustManager.masks.length >= 8}
+          aria-label="Add radial mask"
+        >
+          <Icon icon={mdiCircleOutline} size="14" />
+          <span>Radial</span>
+        </button>
+      </div>
+    </div>
+
+    {#if adjustManager.masks.length > 0}
+      <ul class="flex flex-col gap-0.5 mb-2">
+        <li>
+          <button
+            type="button"
+            class="flex w-full items-center justify-between rounded px-2 py-1 text-xs
+              {adjustManager.selectedMaskIndex === null
+                ? 'bg-immich-primary text-black'
+                : 'text-gray-300 hover:bg-gray-700'}"
+            onclick={() => adjustManager.selectMask(null)}
+          >
+            <span>Global</span>
+          </button>
+        </li>
+        {#each adjustManager.masks as mask, i (i)}
+          <li class="flex items-center gap-1">
+            <button
+              type="button"
+              class="flex flex-1 items-center justify-between rounded px-2 py-1 text-xs
+                {adjustManager.selectedMaskIndex === i
+                  ? 'bg-immich-primary text-black'
+                  : 'text-gray-300 hover:bg-gray-700'}"
+              onclick={() => adjustManager.selectMask(i)}
+            >
+              <span>{maskLabel(mask, i)}</span>
+            </button>
+            <button
+              type="button"
+              class="rounded p-1 text-gray-300 hover:text-white hover:bg-gray-700"
+              onclick={() => adjustManager.removeMask(i)}
+              aria-label={`Delete ${maskLabel(mask, i)}`}
+            >
+              <Icon icon={mdiDelete} size="14" />
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+
     <!-- Light adjustments -->
-    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1">{$t('adjust_light')}</h2>
+    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-2">
+      {$t('adjust_light')}{adjustManager.selectedMaskIndex !== null
+        ? ` — ${maskLabel(adjustManager.masks[adjustManager.selectedMaskIndex], adjustManager.selectedMaskIndex)}`
+        : ''}
+    </h2>
     {#each lightSliders as slider (slider.key)}
       <AdjustSlider
         icon={slider.icon}
         label={$t(slider.labelKey)}
-        value={adjustManager.values[slider.key]}
+        value={adjustManager.activeSliders[slider.key]}
         onchange={(v) => adjustManager.setValue(slider.key, v)}
       />
     {/each}
@@ -275,7 +376,7 @@
       <AdjustSlider
         icon={slider.icon}
         label={$t(slider.labelKey)}
-        value={adjustManager.values[slider.key]}
+        value={adjustManager.activeSliders[slider.key]}
         onchange={(v) => adjustManager.setValue(slider.key, v)}
       />
     {/each}
