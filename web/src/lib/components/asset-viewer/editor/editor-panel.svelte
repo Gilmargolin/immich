@@ -295,20 +295,30 @@
       <div class="flex gap-1">
         <button
           type="button"
-          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-gray-300 hover:text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          onclick={() => adjustManager.addLinearMask()}
+          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
+            {adjustManager.pendingMaskKind === 'linear' ? 'bg-immich-primary text-black' : 'text-gray-300 hover:text-white'}"
+          onclick={() =>
+            adjustManager.pendingMaskKind === 'linear'
+              ? adjustManager.cancelDrawingMask()
+              : adjustManager.startDrawingMask('linear')}
           disabled={adjustManager.masks.length >= 8}
-          aria-label="Add linear gradient mask"
+          aria-label="Draw linear gradient mask"
+          title="Click, then drag on the photo to define the gradient"
         >
           <Icon icon={mdiGradientHorizontal} size="14" />
           <span>Linear</span>
         </button>
         <button
           type="button"
-          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-gray-300 hover:text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          onclick={() => adjustManager.addRadialMask()}
+          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
+            {adjustManager.pendingMaskKind === 'radial' ? 'bg-immich-primary text-black' : 'text-gray-300 hover:text-white'}"
+          onclick={() =>
+            adjustManager.pendingMaskKind === 'radial'
+              ? adjustManager.cancelDrawingMask()
+              : adjustManager.startDrawingMask('radial')}
           disabled={adjustManager.masks.length >= 8}
-          aria-label="Add radial mask"
+          aria-label="Draw radial mask"
+          title="Click, then drag on the photo from center outward"
         >
           <Icon icon={mdiCircleOutline} size="14" />
           <span>Radial</span>

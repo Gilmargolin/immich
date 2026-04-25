@@ -67,6 +67,9 @@ export class AdjustManager implements EditToolManager {
   masks = $state<LocalMask[]>([]);
   // null = editing globals; index = editing that mask's params via the slider panel.
   selectedMaskIndex = $state<number | null>(null);
+  // When set, the next click-drag on the photo creates a mask of this kind
+  // (Lightroom-style draw flow). null = drawing inactive.
+  pendingMaskKind = $state<'linear' | 'radial' | null>(null);
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
   private initialMasks = $state<LocalMask[]>([]);
 
@@ -225,6 +228,62 @@ export class AdjustManager implements EditToolManager {
   addRadialMask(): void {
     this.masks = [...this.masks, defaultRadialMask()];
     this.selectedMaskIndex = this.masks.length - 1;
+  }
+
+  // Lightroom-style draw flow: arm draw mode and let the overlay component
+  // listen for pointer events on the photo. The mask is materialized on
+  // pointerup with the user-drawn geometry, not on this call.
+  startDrawingMask(kind: 'linear' | 'radial'): void {
+    if (this.masks.length >= 8) {
+      return;
+    }
+    this.pendingMaskKind = kind;
+  }
+
+  cancelDrawingMask(): void {
+    this.pendingMaskKind = null;
+  }
+
+  // Called by the overlay on pointerup with linear endpoints already in
+  // normalized [0,1] image-W/H coordinates.
+  commitDrawnLinearMask(ax: number, ay: number, bx: number, by: number): void {
+    if (this.pendingMaskKind !== 'linear') {
+      return;
+    }
+    const mask: LocalMask = {
+      kind: 'linear',
+      ax,
+      ay,
+      bx,
+      by,
+      params: { ...defaultValues },
+    };
+    this.masks = [...this.masks, mask];
+    this.selectedMaskIndex = this.masks.length - 1;
+    this.pendingMaskKind = null;
+  }
+
+  // Called by the overlay on pointerup. cx/cy in normalized image-W/H.
+  // rx/ry already converted to the DTO's min(W, H)-relative units by the
+  // overlay (which owns the aspect ratio knowledge).
+  commitDrawnRadialMask(cx: number, cy: number, rx: number, ry: number): void {
+    if (this.pendingMaskKind !== 'radial') {
+      return;
+    }
+    const mask: LocalMask = {
+      kind: 'radial',
+      cx,
+      cy,
+      rx: Math.max(0.02, rx),
+      ry: Math.max(0.02, ry),
+      angle: 0,
+      feather: 0.2,
+      invert: false,
+      params: { ...defaultValues },
+    };
+    this.masks = [...this.masks, mask];
+    this.selectedMaskIndex = this.masks.length - 1;
+    this.pendingMaskKind = null;
   }
 
   removeMask(index: number): void {

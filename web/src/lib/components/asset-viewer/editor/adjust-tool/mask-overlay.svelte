@@ -3,13 +3,17 @@
   import type { LinearMask, LocalMask, RadialMask } from '$lib/managers/edit/adjust-webgl';
   import { onDestroy } from 'svelte';
 
-  // Interactive SVG overlay that renders mask gizmos on top of the adjust
-  // canvas. Selected mask gets full draggable handles; unselected masks
-  // render as dimmed outlines so the user can still locate them.
+  // Interactive SVG overlay over the adjust canvas. Three modes:
+  //   - Idle: render mask gizmos for existing masks. Selected mask gets full
+  //     handles + affected-area gradient overlay; others render dim outlines.
+  //   - Draw: pendingMaskKind is set. Cursor becomes crosshair. Pointerdown
+  //     records the start, pointermove draws a preview, pointerup commits a
+  //     new mask via adjustManager.commitDrawnXxxMask.
   //
-  // Coordinate system: SVG fills the same area as the underlying canvas.
-  // Mask geometry is stored normalized [0,1]; we multiply by SVG dims for
-  // rendering and divide pointer coords by SVG dims to update geometry.
+  // Coordinate system: SVG fills the same area as the canvas underneath.
+  // Mask DTOs use normalized [0,1] (cx/ax/etc. to image W/H; radial rx/ry to
+  // min(W,H)). We multiply by SVG dims for rendering and divide pointer
+  // coords by SVG dims to update geometry.
 
   let svg = $state<SVGSVGElement | null>(null);
   let svgWidth = $state(0);
@@ -17,6 +21,12 @@
 
   let masks = $derived(adjustManager.masks);
   let selectedIndex = $derived(adjustManager.selectedMaskIndex);
+  let pendingKind = $derived(adjustManager.pendingMaskKind);
+
+  // Live preview of the in-progress drawn mask (during pointer drag).
+  // null when not drawing or no point captured yet.
+  let drawStart = $state<{ nx: number; ny: number } | null>(null);
+  let drawCurrent = $state<{ nx: number; ny: number } | null>(null);
 
   let resizeObserver: ResizeObserver | null = null;
 
@@ -46,7 +56,6 @@
 
   const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
-  // Convert pointer event → normalized [0,1] coordinates relative to SVG.
   const eventToNormalized = (e: PointerEvent) => {
     if (!svg) {
       return { nx: 0, ny: 0 };
@@ -58,9 +67,6 @@
     };
   };
 
-  // Generic drag helper. Captures pointer, fires onMove on each pointermove
-  // with cumulative delta in normalized coords (and the initial position).
-  // Releases on pointerup or pointercancel.
   const startDrag = (
     e: PointerEvent,
     onMove: (state: { nx: number; ny: number; dnx: number; dny: number; startNx: number; startNy: number }) => void,
@@ -95,7 +101,7 @@
     target.addEventListener('pointercancel', handleUp);
   };
 
-  // ---------- Linear mask drag handlers ----------
+  // ---------- Linear mask handle drag ----------
 
   const dragLinearA = (e: PointerEvent, idx: number, mask: LinearMask) => {
     adjustManager.selectMask(idx);
@@ -125,7 +131,7 @@
     });
   };
 
-  // ---------- Radial mask drag handlers ----------
+  // ---------- Radial mask handle drag ----------
 
   const dragRadialCenter = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
@@ -141,7 +147,6 @@
 
   const dragRadialRx = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
-    // rx is normalized to min(W, H). Convert pixel delta from center → rx.
     const minDim = Math.min(svgWidth, svgHeight);
     if (minDim < 1) {
       return;
@@ -166,15 +171,82 @@
     });
   };
 
-  // ---------- Click on background to deselect ----------
+  // ---------- Draw-mode pointer handlers ----------
+
+  const onDrawPointerDown = (e: PointerEvent) => {
+    if (!pendingKind) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.currentTarget as Element;
+    target.setPointerCapture(e.pointerId);
+    const start = eventToNormalized(e);
+    drawStart = start;
+    drawCurrent = start;
+
+    const handleMove = (ev: Event) => {
+      drawCurrent = eventToNormalized(ev as PointerEvent);
+    };
+    const handleUp = (ev: Event) => {
+      const pe = ev as PointerEvent;
+      target.releasePointerCapture(pe.pointerId);
+      target.removeEventListener('pointermove', handleMove);
+      target.removeEventListener('pointerup', handleUp);
+      target.removeEventListener('pointercancel', handleUp);
+      commitDrawn();
+    };
+    target.addEventListener('pointermove', handleMove);
+    target.addEventListener('pointerup', handleUp);
+    target.addEventListener('pointercancel', handleUp);
+  };
+
+  const commitDrawn = () => {
+    const start = drawStart;
+    const cur = drawCurrent;
+    drawStart = null;
+    drawCurrent = null;
+    if (!start || !cur || !pendingKind) {
+      adjustManager.cancelDrawingMask();
+      return;
+    }
+    const dx = cur.nx - start.nx;
+    const dy = cur.ny - start.ny;
+    // Click without drag → ignore (user probably clicked a handle target).
+    if (Math.abs(dx) < 0.005 && Math.abs(dy) < 0.005) {
+      adjustManager.cancelDrawingMask();
+      return;
+    }
+    if (pendingKind === 'linear') {
+      adjustManager.commitDrawnLinearMask(start.nx, start.ny, cur.nx, cur.ny);
+    } else {
+      // Convert pixel-space radius from drag → DTO's min(W,H)-relative units.
+      const minDim = Math.min(svgWidth, svgHeight);
+      if (minDim < 1) {
+        adjustManager.cancelDrawingMask();
+        return;
+      }
+      const pxDx = dx * svgWidth;
+      const pxDy = dy * svgHeight;
+      const pxRadius = Math.hypot(pxDx, pxDy);
+      const r = pxRadius / minDim;
+      adjustManager.commitDrawnRadialMask(start.nx, start.ny, r, r);
+    }
+  };
+
+  // ---------- Background click deselects (idle mode only) ----------
 
   const onSvgClick = (e: MouseEvent) => {
+    if (pendingKind) {
+      return;
+    }
     if (e.target === svg) {
       adjustManager.selectMask(null);
     }
   };
 
-  // Pixel-space helpers for rendering
+  // ---------- Pixel-space helpers ----------
+
   let minDim = $derived(Math.min(svgWidth, svgHeight));
 
   const linearPx = (m: LinearMask) => ({
@@ -195,14 +267,102 @@
     rx: m.rx * minDim,
     ry: m.ry * minDim,
   });
+
+  // Preview shape during draw (shown at pointer position before commit).
+  let previewLinear = $derived.by(() => {
+    if (pendingKind !== 'linear' || !drawStart || !drawCurrent) {
+      return null;
+    }
+    return {
+      ax: drawStart.nx * svgWidth,
+      ay: drawStart.ny * svgHeight,
+      bx: drawCurrent.nx * svgWidth,
+      by: drawCurrent.ny * svgHeight,
+    };
+  });
+
+  let previewRadial = $derived.by(() => {
+    if (pendingKind !== 'radial' || !drawStart || !drawCurrent) {
+      return null;
+    }
+    const cx = drawStart.nx * svgWidth;
+    const cy = drawStart.ny * svgHeight;
+    const dxPx = (drawCurrent.nx - drawStart.nx) * svgWidth;
+    const dyPx = (drawCurrent.ny - drawStart.ny) * svgHeight;
+    const r = Math.hypot(dxPx, dyPx);
+    return { cx, cy, rx: r, ry: r };
+  });
 </script>
 
 <svg
   bind:this={svg}
   class="absolute inset-0 h-full w-full"
+  style="cursor: {pendingKind ? 'crosshair' : 'default'}; touch-action: none;"
   onclick={onSvgClick}
+  onpointerdown={onDrawPointerDown}
   role="presentation"
 >
+  <!--
+    Per-mask gradient defs for the affected-area overlay (selected mask only).
+    SVG gradients are linear/radial in pure stop-offset space; the mask math
+    uses smoothstep, so the visualized falloff is approximately right but not
+    pixel-exact. Good enough as a guide.
+  -->
+  <defs>
+    {#each masks as mask, i (i)}
+      {#if i === selectedIndex}
+        {#if mask.kind === 'linear'}
+          {@const lp = linearPx(mask)}
+          <linearGradient
+            id="mask-overlay-grad-{i}"
+            x1={lp.ax}
+            y1={lp.ay}
+            x2={lp.bx}
+            y2={lp.by}
+            gradientUnits="userSpaceOnUse"
+          >
+            <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
+          </linearGradient>
+        {:else}
+          <radialGradient
+            id="mask-overlay-grad-{i}"
+            cx={mask.cx * svgWidth}
+            cy={mask.cy * svgHeight}
+            r={Math.max(mask.rx, mask.ry) * minDim}
+            fx={mask.cx * svgWidth}
+            fy={mask.cy * svgHeight}
+            gradientUnits="userSpaceOnUse"
+          >
+            <stop offset={Math.max(0, 1 - Math.max(0.001, mask.feather))} stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
+          </radialGradient>
+        {/if}
+      {/if}
+    {/each}
+  </defs>
+
+  <!-- Affected-area overlay (selected mask only) — non-interactive tint. -->
+  {#each masks as mask, i (i)}
+    {#if i === selectedIndex}
+      {#if mask.kind === 'linear'}
+        <rect x="0" y="0" width={svgWidth} height={svgHeight} fill="url(#mask-overlay-grad-{i})" pointer-events="none" />
+      {:else}
+        {@const px = radialPx(mask)}
+        <ellipse
+          cx={px.cx}
+          cy={px.cy}
+          rx={px.rx}
+          ry={px.ry}
+          fill="url(#mask-overlay-grad-{i})"
+          transform="rotate({mask.angle} {px.cx} {px.cy})"
+          pointer-events="none"
+        />
+      {/if}
+    {/if}
+  {/each}
+
+  <!-- Mask gizmos -->
   {#each masks as mask, i (i)}
     {@const isSelected = i === selectedIndex}
     {@const opacity = isSelected ? 1 : 0.45}
@@ -211,7 +371,6 @@
       {@const px = linearPx(mask)}
       {@const mid = linearMid(mask)}
       <g style="opacity: {opacity};">
-        <!-- Connecting line A→B -->
         <line
           x1={px.ax}
           y1={px.ay}
@@ -222,7 +381,6 @@
           stroke-dasharray="6 4"
           pointer-events="none"
         />
-        <!-- Translate handle on the midpoint -->
         <circle
           cx={mid.mx}
           cy={mid.my}
@@ -234,7 +392,6 @@
           style="cursor: move;"
           onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
         />
-        <!-- A handle (filled = weight 1) -->
         <circle
           cx={px.ax}
           cy={px.ay}
@@ -245,7 +402,6 @@
           style="cursor: grab;"
           onpointerdown={(e) => dragLinearA(e, i, mask)}
         />
-        <!-- B handle (outline = weight 0) -->
         <circle
           cx={px.bx}
           cy={px.by}
@@ -263,7 +419,6 @@
       <g
         style="opacity: {opacity}; transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;"
       >
-        <!-- Outer ellipse (weight=0 boundary) -->
         <ellipse
           cx={px.cx}
           cy={px.cy}
@@ -275,7 +430,6 @@
           stroke-dasharray="6 4"
           pointer-events="none"
         />
-        <!-- Inner ellipse (weight=1 boundary, feather edge) -->
         <ellipse
           cx={px.cx}
           cy={px.cy}
@@ -287,7 +441,6 @@
           stroke-dasharray="3 3"
           pointer-events="none"
         />
-        <!-- Center handle (translate) -->
         <circle
           cx={px.cx}
           cy={px.cy}
@@ -298,7 +451,6 @@
           style="cursor: move;"
           onpointerdown={(e) => dragRadialCenter(e, i, mask)}
         />
-        <!-- Right edge handle (rx) -->
         <circle
           cx={px.cx + px.rx}
           cy={px.cy}
@@ -309,7 +461,6 @@
           style="cursor: ew-resize;"
           onpointerdown={(e) => dragRadialRx(e, i, mask)}
         />
-        <!-- Bottom edge handle (ry) -->
         <circle
           cx={px.cx}
           cy={px.cy + px.ry}
@@ -323,4 +474,59 @@
       </g>
     {/if}
   {/each}
+
+  <!-- Draw-mode preview shape (while user is dragging) -->
+  {#if previewLinear}
+    <line
+      x1={previewLinear.ax}
+      y1={previewLinear.ay}
+      x2={previewLinear.bx}
+      y2={previewLinear.by}
+      stroke="#0ea5e9"
+      stroke-width="2"
+      pointer-events="none"
+    />
+    <circle cx={previewLinear.ax} cy={previewLinear.ay} r="6" fill="#0ea5e9" pointer-events="none" />
+    <circle cx={previewLinear.bx} cy={previewLinear.by} r="6" fill="white" stroke="#0ea5e9" stroke-width="2" pointer-events="none" />
+  {/if}
+
+  {#if previewRadial}
+    <ellipse
+      cx={previewRadial.cx}
+      cy={previewRadial.cy}
+      rx={previewRadial.rx}
+      ry={previewRadial.ry}
+      fill="rgba(14, 165, 233, 0.1)"
+      stroke="#0ea5e9"
+      stroke-width="2"
+      pointer-events="none"
+    />
+    <circle cx={previewRadial.cx} cy={previewRadial.cy} r="6" fill="#0ea5e9" pointer-events="none" />
+  {/if}
+
+  <!-- Draw-mode hint (shown before the user clicks) -->
+  {#if pendingKind && !drawStart}
+    <g pointer-events="none">
+      <rect
+        x={svgWidth / 2 - 140}
+        y="20"
+        width="280"
+        height="32"
+        rx="6"
+        fill="rgba(0, 0, 0, 0.7)"
+      />
+      <text
+        x={svgWidth / 2}
+        y="40"
+        text-anchor="middle"
+        fill="white"
+        font-size="13"
+        font-family="system-ui, sans-serif"
+      >
+        {pendingKind === 'linear'
+          ? 'Click and drag to draw the gradient'
+          : 'Click and drag from center outward'}
+      </text>
+    </g>
+  {/if}
 </svg>
