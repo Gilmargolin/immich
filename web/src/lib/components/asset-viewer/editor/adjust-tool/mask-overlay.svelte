@@ -21,6 +21,7 @@
 
   let masks = $derived(adjustManager.masks);
   let selectedIndex = $derived(adjustManager.selectedMaskIndex);
+  let editingIndex = $derived(adjustManager.editingMaskIndex);
   let pendingKind = $derived(adjustManager.pendingMaskKind);
 
   // Live preview of the in-progress drawn mask (during pointer drag).
@@ -303,14 +304,13 @@
   role="presentation"
 >
   <!--
-    Per-mask gradient defs for the affected-area overlay (selected mask only).
-    SVG gradients are linear/radial in pure stop-offset space; the mask math
-    uses smoothstep, so the visualized falloff is approximately right but not
-    pixel-exact. Good enough as a guide.
+    Per-mask gradient defs for the affected-area overlay. Only rendered when
+    the user is actively editing that mask's geometry (clicked the pencil)
+    so a freshly-committed mask doesn't keep a red tint forever.
   -->
   <defs>
     {#each masks as mask, i (i)}
-      {#if i === selectedIndex}
+      {#if i === editingIndex}
         {#if mask.kind === 'linear'}
           {@const lp = linearPx(mask)}
           <linearGradient
@@ -342,9 +342,9 @@
     {/each}
   </defs>
 
-  <!-- Affected-area overlay (selected mask only) — non-interactive tint. -->
+  <!-- Affected-area overlay (editing mask only) — non-interactive tint. -->
   {#each masks as mask, i (i)}
-    {#if i === selectedIndex}
+    {#if i === editingIndex}
       {#if mask.kind === 'linear'}
         <rect x="0" y="0" width={svgWidth} height={svgHeight} fill="url(#mask-overlay-grad-{i})" pointer-events="none" />
       {:else}
@@ -362,116 +362,119 @@
     {/if}
   {/each}
 
-  <!-- Mask gizmos -->
+  <!--
+    Mask gizmos. Three tiers:
+      - Editing (i === editingIndex): full handles, draggable, prominent.
+      - Otherwise: nothing — committed masks are invisible until the user
+        clicks the pencil to enter geometry-edit mode. Keeps the photo
+        clean for slider-only workflows.
+  -->
   {#each masks as mask, i (i)}
-    {@const isSelected = i === selectedIndex}
-    {@const opacity = isSelected ? 1 : 0.45}
-
-    {#if mask.kind === 'linear'}
-      {@const px = linearPx(mask)}
-      {@const mid = linearMid(mask)}
-      <g style="opacity: {opacity};">
-        <line
-          x1={px.ax}
-          y1={px.ay}
-          x2={px.bx}
-          y2={px.by}
-          stroke="#7dd3fc"
-          stroke-width="2"
-          stroke-dasharray="6 4"
-          pointer-events="none"
-        />
-        <circle
-          cx={mid.mx}
-          cy={mid.my}
-          r="6"
-          fill="#7dd3fc"
-          fill-opacity="0.5"
-          stroke="#0c4a6e"
-          stroke-width="1.5"
-          style="cursor: move;"
-          onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
-        />
-        <circle
-          cx={px.ax}
-          cy={px.ay}
-          r="9"
-          fill="#0ea5e9"
-          stroke="white"
-          stroke-width="2"
-          style="cursor: grab;"
-          onpointerdown={(e) => dragLinearA(e, i, mask)}
-        />
-        <circle
-          cx={px.bx}
-          cy={px.by}
-          r="9"
-          fill="white"
-          stroke="#0ea5e9"
-          stroke-width="2.5"
-          style="cursor: grab;"
-          onpointerdown={(e) => dragLinearB(e, i, mask)}
-        />
-      </g>
-    {:else}
-      {@const px = radialPx(mask)}
-      {@const featherInner = Math.max(0.001, 1 - mask.feather)}
-      <g
-        style="opacity: {opacity}; transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;"
-      >
-        <ellipse
-          cx={px.cx}
-          cy={px.cy}
-          rx={px.rx}
-          ry={px.ry}
-          fill="none"
-          stroke="#7dd3fc"
-          stroke-width="2"
-          stroke-dasharray="6 4"
-          pointer-events="none"
-        />
-        <ellipse
-          cx={px.cx}
-          cy={px.cy}
-          rx={px.rx * featherInner}
-          ry={px.ry * featherInner}
-          fill="none"
-          stroke="#7dd3fc"
-          stroke-width="1"
-          stroke-dasharray="3 3"
-          pointer-events="none"
-        />
-        <circle
-          cx={px.cx}
-          cy={px.cy}
-          r="9"
-          fill="#0ea5e9"
-          stroke="white"
-          stroke-width="2"
-          style="cursor: move;"
-          onpointerdown={(e) => dragRadialCenter(e, i, mask)}
-        />
-        <circle
-          cx={px.cx + px.rx}
-          cy={px.cy}
-          r="7"
-          fill="white"
-          stroke="#0ea5e9"
-          stroke-width="2"
-          style="cursor: ew-resize;"
-          onpointerdown={(e) => dragRadialRx(e, i, mask)}
-        />
-        <circle
-          cx={px.cx}
-          cy={px.cy + px.ry}
-          r="7"
-          fill="white"
-          stroke="#0ea5e9"
-          stroke-width="2"
-          style="cursor: ns-resize;"
-          onpointerdown={(e) => dragRadialRy(e, i, mask)}
-        />
-      </g>
+    {#if i === editingIndex}
+      {#if mask.kind === 'linear'}
+        {@const px = linearPx(mask)}
+        {@const mid = linearMid(mask)}
+        <g>
+          <line
+            x1={px.ax}
+            y1={px.ay}
+            x2={px.bx}
+            y2={px.by}
+            stroke="#7dd3fc"
+            stroke-width="2"
+            stroke-dasharray="6 4"
+            pointer-events="none"
+          />
+          <circle
+            cx={mid.mx}
+            cy={mid.my}
+            r="6"
+            fill="#7dd3fc"
+            fill-opacity="0.5"
+            stroke="#0c4a6e"
+            stroke-width="1.5"
+            style="cursor: move;"
+            onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
+          />
+          <circle
+            cx={px.ax}
+            cy={px.ay}
+            r="9"
+            fill="#0ea5e9"
+            stroke="white"
+            stroke-width="2"
+            style="cursor: grab;"
+            onpointerdown={(e) => dragLinearA(e, i, mask)}
+          />
+          <circle
+            cx={px.bx}
+            cy={px.by}
+            r="9"
+            fill="white"
+            stroke="#0ea5e9"
+            stroke-width="2.5"
+            style="cursor: grab;"
+            onpointerdown={(e) => dragLinearB(e, i, mask)}
+          />
+        </g>
+      {:else}
+        {@const px = radialPx(mask)}
+        {@const featherInner = Math.max(0.001, 1 - mask.feather)}
+        <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
+          <ellipse
+            cx={px.cx}
+            cy={px.cy}
+            rx={px.rx}
+            ry={px.ry}
+            fill="none"
+            stroke="#7dd3fc"
+            stroke-width="2"
+            stroke-dasharray="6 4"
+            pointer-events="none"
+          />
+          <ellipse
+            cx={px.cx}
+            cy={px.cy}
+            rx={px.rx * featherInner}
+            ry={px.ry * featherInner}
+            fill="none"
+            stroke="#7dd3fc"
+            stroke-width="1"
+            stroke-dasharray="3 3"
+            pointer-events="none"
+          />
+          <circle
+            cx={px.cx}
+            cy={px.cy}
+            r="9"
+            fill="#0ea5e9"
+            stroke="white"
+            stroke-width="2"
+            style="cursor: move;"
+            onpointerdown={(e) => dragRadialCenter(e, i, mask)}
+          />
+          <circle
+            cx={px.cx + px.rx}
+            cy={px.cy}
+            r="7"
+            fill="white"
+            stroke="#0ea5e9"
+            stroke-width="2"
+            style="cursor: ew-resize;"
+            onpointerdown={(e) => dragRadialRx(e, i, mask)}
+          />
+          <circle
+            cx={px.cx}
+            cy={px.cy + px.ry}
+            r="7"
+            fill="white"
+            stroke="#0ea5e9"
+            stroke-width="2"
+            style="cursor: ns-resize;"
+            onpointerdown={(e) => dragRadialRy(e, i, mask)}
+          />
+        </g>
+      {/if}
     {/if}
   {/each}
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
-  import { AdjustGLRenderer } from '$lib/managers/edit/adjust-webgl';
+  import { AdjustGLRenderer, FULL_CROP, type CropRect } from '$lib/managers/edit/adjust-webgl';
+  import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { onDestroy, onMount, type Snippet } from 'svelte';
 
   interface Props {
@@ -14,13 +15,34 @@
   let canvas = $state<HTMLCanvasElement | null>(null);
   let renderer: AdjustGLRenderer | null = null;
   let imageLoaded = $state(false);
-  // Image aspect ratio (W/H). Used so the canvas+overlay wrapper sizes to the
-  // image's aspect within the available area (object-contain semantics).
+  // Aspect ratio of the *visible* (cropped) area — drives the wrapper sizing
+  // so the SVG overlay lands exactly on the rendered photo.
   let aspectRatio = $state(1);
 
-  // The current image element kept around so we can re-upload to the texture
-  // if WebGL state ever needs to be rebuilt (e.g. context loss).
   let img = $state<HTMLImageElement | null>(null);
+
+  // Pending crop, expressed in texture UV [0,1]. Read from transformManager:
+  // its `region` is in displayed-image coords (cropImageSize × cropImageScale),
+  // so dividing by displayedImage{Width,Height} gives the UV. When the user
+  // hasn't cropped yet, the region equals the full displayed image and this
+  // collapses to FULL_CROP.
+  let cropRect = $derived.by((): CropRect => {
+    const dw = transformManager.displayedImageWidth;
+    const dh = transformManager.displayedImageHeight;
+    if (dw < 1 || dh < 1) {
+      return FULL_CROP;
+    }
+    const r = transformManager.region;
+    const u0 = Math.max(0, Math.min(1, r.x / dw));
+    const v0 = Math.max(0, Math.min(1, r.y / dh));
+    const u1 = Math.max(0, Math.min(1, (r.x + r.width) / dw));
+    const v1 = Math.max(0, Math.min(1, (r.y + r.height) / dh));
+    // Tiny default region (100x100 from initial state) → treat as full crop.
+    if (u1 - u0 < 0.01 || v1 - v0 < 0.01) {
+      return FULL_CROP;
+    }
+    return { u0, v0, u1, v1 };
+  });
 
   $effect(() => {
     if (!canvas) {
@@ -38,9 +60,6 @@
     }
   });
 
-  // Load the source image whenever it changes. Using fetch+createImageBitmap
-  // (rather than a plain <img>) avoids CORS-tainting the canvas read path
-  // and lets us tear down the bitmap after upload.
   $effect(() => {
     const url = src;
     if (!url || !renderer) {
@@ -56,9 +75,14 @@
         return;
       }
       img = el;
-      aspectRatio = el.naturalWidth / Math.max(1, el.naturalHeight);
       renderer.setImage(el);
-      renderer.resizeCanvas();
+      // Initial sizing — gets refined by the cropRect effect below once
+      // the renderer + image are both in.
+      renderer.resizeCanvas(cropRect);
+      const c = cropRect;
+      const cropW = (c.u1 - c.u0) * el.naturalWidth;
+      const cropH = (c.v1 - c.v0) * el.naturalHeight;
+      aspectRatio = cropW / Math.max(1, cropH);
       imageLoaded = true;
       scheduleRender();
     };
@@ -73,9 +97,20 @@
     };
   });
 
-  // Re-render whenever sliders or masks change. We track the relevant state
-  // through Svelte's $derived/$effect machinery so changing a slider triggers
-  // a single GL draw on the next frame.
+  // When the crop changes (user re-crops then comes back to mask mode),
+  // resize the canvas + update aspect-ratio + re-render.
+  $effect(() => {
+    const c = cropRect;
+    if (!renderer || !imageLoaded || !img) {
+      return;
+    }
+    renderer.resizeCanvas(c);
+    const cropW = (c.u1 - c.u0) * img.naturalWidth;
+    const cropH = (c.v1 - c.v0) * img.naturalHeight;
+    aspectRatio = cropW / Math.max(1, cropH);
+    scheduleRender();
+  });
+
   let pendingRaf: number | null = null;
   const scheduleRender = () => {
     if (pendingRaf !== null) {
@@ -84,13 +119,12 @@
     pendingRaf = requestAnimationFrame(() => {
       pendingRaf = null;
       if (renderer && imageLoaded) {
-        renderer.render(adjustManager.values, adjustManager.masks);
+        renderer.render(adjustManager.values, adjustManager.masks, cropRect);
       }
     });
   };
 
   $effect(() => {
-    // Read reactive state to subscribe to it.
     void adjustManager.values.brightness;
     void adjustManager.values.contrast;
     void adjustManager.values.saturation;
@@ -120,12 +154,6 @@
 </script>
 
 <div class="relative flex h-full w-full items-center justify-center">
-  <!--
-    Inner wrapper sized to the image's aspect ratio within the available area
-    (max-h/max-w + aspect-ratio = "object-contain" for a div). Canvas fills
-    the wrapper; the children slot is layered on top at the same dimensions
-    so the mask overlay lands exactly on top of the rendered image.
-  -->
   <div
     class="relative"
     style="max-width: 100%; max-height: 100%; aspect-ratio: {aspectRatio}; width: 100%; height: 100%;"

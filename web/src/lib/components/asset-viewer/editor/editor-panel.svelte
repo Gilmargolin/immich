@@ -10,10 +10,12 @@
   import {
     mdiClose,
     mdiContentCopy,
+    mdiCrop,
     mdiDelete,
     mdiFlipHorizontal,
     mdiFlipVertical,
     mdiGradientHorizontal,
+    mdiPencilOutline,
     mdiRotateLeft,
     mdiRotateRight,
   } from '@mdi/js';
@@ -204,6 +206,16 @@
         shape="round"
         size="small"
         variant="ghost"
+        color={editManager.isCropMode ? 'primary' : 'secondary'}
+        icon={mdiCrop}
+        aria-label="Toggle crop mode"
+        title="Crop mode"
+        onclick={() => (editManager.isCropMode ? exitCropMode() : enterCropMode())}
+      />
+      <IconButton
+        shape="round"
+        size="small"
+        variant="ghost"
         color="secondary"
         icon={mdiContentCopy}
         aria-label="Copy adjustments to clipboard"
@@ -357,11 +369,25 @@
                   ? 'bg-immich-primary text-black'
                   : 'text-gray-300 hover:bg-gray-700'}"
               onclick={() => {
-              exitCropMode();
-              adjustManager.selectMask(i);
-            }}
+                exitCropMode();
+                adjustManager.selectMask(i);
+              }}
+              title="Select for slider editing"
             >
               <span>{maskLabel(mask, i)}</span>
+            </button>
+            <button
+              type="button"
+              class="rounded p-1 hover:bg-gray-700
+                {adjustManager.editingMaskIndex === i ? 'text-immich-primary' : 'text-gray-300 hover:text-white'}"
+              onclick={() => {
+                exitCropMode();
+                adjustManager.toggleEditingMask(i);
+              }}
+              aria-label={`Edit geometry of ${maskLabel(mask, i)}`}
+              title="Edit position / shape"
+            >
+              <Icon icon={mdiPencilOutline} size="14" />
             </button>
             <button
               type="button"

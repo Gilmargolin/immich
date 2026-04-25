@@ -71,6 +71,7 @@ const linkProgram = (gl: WebGL2RenderingContext, vs: WebGLShader, fs: WebGLShade
 type Uniforms = {
   u_image: WebGLUniformLocation;
   u_imageSize: WebGLUniformLocation;
+  u_cropRect: WebGLUniformLocation;
   globals: Record<keyof AdjustmentSliders, WebGLUniformLocation>;
   u_maskCount: WebGLUniformLocation;
   u_maskKind: WebGLUniformLocation;
@@ -80,6 +81,10 @@ type Uniforms = {
   u_maskSliders1: WebGLUniformLocation;
   u_maskBlackPoint: WebGLUniformLocation;
 };
+
+// Crop UV rect (u0, v0, u1, v1). Default is the full image (no crop).
+export type CropRect = { u0: number; v0: number; u1: number; v1: number };
+export const FULL_CROP: CropRect = { u0: 0, v0: 0, u1: 1, v1: 1 };
 
 const requireLocation = (gl: WebGL2RenderingContext, program: WebGLProgram, name: string): WebGLUniformLocation => {
   const loc = gl.getUniformLocation(program, name);
@@ -168,6 +173,7 @@ export class AdjustGLRenderer {
     this.uniforms = {
       u_image: requireLocation(gl, this.program, 'u_image'),
       u_imageSize: requireLocation(gl, this.program, 'u_imageSize'),
+      u_cropRect: requireLocation(gl, this.program, 'u_cropRect'),
       globals: {
         brightness: requireLocation(gl, this.program, 'u_brightness'),
         contrast: requireLocation(gl, this.program, 'u_contrast'),
@@ -200,13 +206,17 @@ export class AdjustGLRenderer {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
   }
 
-  // Resize the canvas drawing buffer to the image's native resolution clamped
-  // to a max edge. Browser then scales via CSS to fill the visible area.
-  resizeCanvas(maxEdge = 4096): void {
+  // Resize the canvas drawing buffer to the (cropped) image dimensions
+  // clamped to a max edge. Browser then scales via CSS to fill the visible
+  // area; the wrapper's aspect-ratio is set from these dims so the page
+  // layout shows the cropped photo correctly.
+  resizeCanvas(crop: CropRect = FULL_CROP, maxEdge = 4096): void {
     const canvas = this.gl.canvas as HTMLCanvasElement;
-    const aspect = this.imageWidth / Math.max(1, this.imageHeight);
-    let w = this.imageWidth;
-    let h = this.imageHeight;
+    const cropW = Math.max(1, (crop.u1 - crop.u0) * this.imageWidth);
+    const cropH = Math.max(1, (crop.v1 - crop.v0) * this.imageHeight);
+    const aspect = cropW / cropH;
+    let w = cropW;
+    let h = cropH;
     if (w > maxEdge || h > maxEdge) {
       if (aspect >= 1) {
         w = maxEdge;
@@ -222,7 +232,7 @@ export class AdjustGLRenderer {
     }
   }
 
-  render(globals: AdjustmentSliders, masks: LocalMask[]): void {
+  render(globals: AdjustmentSliders, masks: LocalMask[], crop: CropRect = FULL_CROP): void {
     const gl = this.gl;
     const u = this.uniforms;
     const canvas = gl.canvas as HTMLCanvasElement;
@@ -237,7 +247,16 @@ export class AdjustGLRenderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.uniform1i(u.u_image, 0);
-    gl.uniform2f(u.u_imageSize, this.imageWidth, this.imageHeight);
+    // The y axis is flipped on upload (UNPACK_FLIP_Y_WEBGL=true), so the
+    // crop's v values are flipped against texture-space-with-flip-y. Pass
+    // them in flipped here so the visible crop matches what the user
+    // selected in crop-area.
+    gl.uniform4f(u.u_cropRect, crop.u0, 1 - crop.v1, crop.u1, 1 - crop.v0);
+    // For mask-weight math, use the crop dimensions in pixels so masks
+    // (whose normalized coords are post-crop) align with what the user sees.
+    const cropPixelW = Math.max(1, (crop.u1 - crop.u0) * this.imageWidth);
+    const cropPixelH = Math.max(1, (crop.v1 - crop.v0) * this.imageHeight);
+    gl.uniform2f(u.u_imageSize, cropPixelW, cropPixelH);
 
     gl.uniform1f(u.globals.brightness, globals.brightness);
     gl.uniform1f(u.globals.contrast, globals.contrast);

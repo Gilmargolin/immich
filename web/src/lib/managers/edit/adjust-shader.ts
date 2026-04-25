@@ -39,6 +39,10 @@ out vec4 outColor;
 
 uniform sampler2D u_image;
 uniform vec2 u_imageSize;
+// Crop rect as (u0, v0, u1, v1) in texture-UV space [0,1]. When the user has
+// a pending crop, this restricts sampling to that subregion so the canvas
+// shows the post-crop view (matches what crop mode renders).
+uniform vec4 u_cropRect;
 
 // Global sliders (same nine fields as AdjustmentSliders)
 uniform float u_brightness;
@@ -167,7 +171,10 @@ float maskWeight(int idx, vec2 px) {
 }
 
 void main() {
-  vec4 srcRgba = texture(u_image, v_texCoord);
+  // Sample within the crop rect — v_texCoord is the canvas's [0,1] but the
+  // texture coords go through the crop region.
+  vec2 uv = mix(u_cropRect.xy, u_cropRect.zw, v_texCoord);
+  vec4 srcRgba = texture(u_image, uv);
   vec3 lin = srgbToLinear(srcRgba.rgb);
 
   lin = applySliders(

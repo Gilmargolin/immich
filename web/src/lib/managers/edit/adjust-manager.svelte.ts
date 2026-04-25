@@ -67,6 +67,10 @@ export class AdjustManager implements EditToolManager {
   masks = $state<LocalMask[]>([]);
   // null = editing globals; index = editing that mask's params via the slider panel.
   selectedMaskIndex = $state<number | null>(null);
+  // Geometry edit: when set, that mask shows handles + red affected-area
+  // overlay. Separate from selection so a user can adjust sliders for a
+  // mask without the visual clutter, and only enter geometry edit on demand.
+  editingMaskIndex = $state<number | null>(null);
   // When set, the next click-drag on the photo creates a mask of this kind
   // (Lightroom-style draw flow). null = drawing inactive.
   pendingMaskKind = $state<'linear' | 'radial' | null>(null);
@@ -181,6 +185,8 @@ export class AdjustManager implements EditToolManager {
 
   async onActivate(_asset: AssetResponseDto, edits: EditActions): Promise<void> {
     this.selectedMaskIndex = null;
+    this.editingMaskIndex = null;
+    this.pendingMaskKind = null;
     const adjustEdit = edits.find((edit) => edit.action === 'adjust');
     if (adjustEdit) {
       const params = adjustEdit.parameters as AdjustmentValues & { masks?: LocalMask[] };
@@ -207,6 +213,8 @@ export class AdjustManager implements EditToolManager {
     this.masks = [];
     this.initialMasks = [];
     this.selectedMaskIndex = null;
+    this.editingMaskIndex = null;
+    this.pendingMaskKind = null;
   }
 
   setValue(key: keyof AdjustmentValues, value: number) {
@@ -288,11 +296,13 @@ export class AdjustManager implements EditToolManager {
 
   removeMask(index: number): void {
     this.masks = this.masks.filter((_, i) => i !== index);
-    if (this.selectedMaskIndex === index) {
-      this.selectedMaskIndex = null;
-    } else if (this.selectedMaskIndex !== null && this.selectedMaskIndex > index) {
-      this.selectedMaskIndex -= 1;
-    }
+    const fixIndex = (current: number | null) => {
+      if (current === index) return null;
+      if (current !== null && current > index) return current - 1;
+      return current;
+    };
+    this.selectedMaskIndex = fixIndex(this.selectedMaskIndex);
+    this.editingMaskIndex = fixIndex(this.editingMaskIndex);
   }
 
   updateMask(index: number, mask: LocalMask): void {
@@ -302,12 +312,22 @@ export class AdjustManager implements EditToolManager {
   selectMask(index: number | null): void {
     if (index === null) {
       this.selectedMaskIndex = null;
+      this.editingMaskIndex = null;
       return;
     }
     if (index < 0 || index >= this.masks.length) {
       return;
     }
     this.selectedMaskIndex = index;
+  }
+
+  toggleEditingMask(index: number): void {
+    if (this.editingMaskIndex === index) {
+      this.editingMaskIndex = null;
+    } else {
+      this.editingMaskIndex = index;
+      this.selectedMaskIndex = index;
+    }
   }
 }
 
