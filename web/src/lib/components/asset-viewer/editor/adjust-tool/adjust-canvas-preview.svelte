@@ -18,7 +18,44 @@
   // so the SVG overlay lands exactly on the rendered photo.
   let aspectRatio = $state(1);
 
+  // Pure-CSS aspect-ratio with both `width: 100%` and `height: 100%` is
+  // overridden (aspect-ratio is ignored when both dims are explicit), and
+  // dropping one collapses the box to zero. JS-driven sizing is reliable:
+  // measure the outer flex area, fit the wrapper to whichever dim binds
+  // first while preserving aspect.
+  let outerEl = $state<HTMLDivElement | null>(null);
+  let outerWidth = $state(0);
+  let outerHeight = $state(0);
+
   let img = $state<HTMLImageElement | null>(null);
+
+  let fittedWidth = $derived.by(() => {
+    if (outerWidth < 1 || outerHeight < 1) return 0;
+    const candidateW = Math.min(outerWidth, outerHeight * aspectRatio);
+    return Math.floor(candidateW);
+  });
+  let fittedHeight = $derived.by(() => {
+    if (outerWidth < 1 || outerHeight < 1) return 0;
+    const candidateH = Math.min(outerHeight, outerWidth / Math.max(0.001, aspectRatio));
+    return Math.floor(candidateH);
+  });
+
+  let outerObserver: ResizeObserver | null = null;
+  $effect(() => {
+    if (!outerEl) return;
+    const updateSize = () => {
+      if (outerEl) {
+        const r = outerEl.getBoundingClientRect();
+        outerWidth = r.width;
+        outerHeight = r.height;
+      }
+    };
+    updateSize();
+    outerObserver?.disconnect();
+    outerObserver = new ResizeObserver(updateSize);
+    outerObserver.observe(outerEl);
+    return () => outerObserver?.disconnect();
+  });
 
   // Crop is intentionally NOT applied to the live preview (was tried in
   // iter2 — caused the photo to "resize" when switching modes because crop
@@ -114,16 +151,18 @@
       cancelAnimationFrame(pendingRaf);
       pendingRaf = null;
     }
+    outerObserver?.disconnect();
+    outerObserver = null;
     renderer?.dispose();
     renderer = null;
     img = null;
   });
 </script>
 
-<div class="relative flex h-full w-full items-center justify-center">
+<div bind:this={outerEl} class="relative flex h-full w-full items-center justify-center">
   <div
     class="relative"
-    style="max-width: 100%; max-height: 100%; aspect-ratio: {aspectRatio}; width: 100%; height: 100%;"
+    style="width: {fittedWidth}px; height: {fittedHeight}px;"
   >
     <canvas
       bind:this={canvas}
