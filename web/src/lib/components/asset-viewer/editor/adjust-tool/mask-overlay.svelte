@@ -243,6 +243,15 @@
       adjustManager.cancelDrawingMask();
       return;
     }
+    // The synthetic 'click' event that fires after this pointerup would
+    // otherwise reach onSvgClick and immediately deselect the freshly drawn
+    // mask (because pointerdown was on the SVG background). Suppress one
+    // click. Reset on a short timer in case the click never arrives (e.g.
+    // pointercancel path).
+    suppressNextSvgClick = true;
+    setTimeout(() => {
+      suppressNextSvgClick = false;
+    }, 250);
     if (pendingKind === 'linear') {
       adjustManager.commitDrawnLinearMask(start.nx, start.ny, cur.nx, cur.ny);
     } else {
@@ -262,7 +271,13 @@
 
   // ---------- Background click deselects (idle mode only) ----------
 
+  let suppressNextSvgClick = false;
+
   const onSvgClick = (e: MouseEvent) => {
+    if (suppressNextSvgClick) {
+      suppressNextSvgClick = false;
+      return;
+    }
     if (pendingKind) {
       return;
     }
@@ -312,6 +327,14 @@
     // biased away from center.
     const transPx = (ax + bx) / 2;
     const transPy = (ay + by) / 2;
+    // The visible mid-knob sits offset PERPENDICULAR to AB by `knobOffset` px
+    // so it never overlaps the translate dot (otherwise z-order makes the
+    // translate dot eat the click on the mid knob, and dragging the diamond
+    // appears to do nothing). Cap the offset against |AB|/3 for very short
+    // gradients.
+    const knobOffset = Math.min(22, len / 3);
+    const knobX = midPx + nx * knobOffset;
+    const knobY = midPy + ny * knobOffset;
     return {
       // Full-effect line (at A, perpendicular to AB).
       full: { x1: ax - nx * ext, y1: ay - ny * ext, x2: ax + nx * ext, y2: ay + ny * ext },
@@ -328,6 +351,8 @@
       by,
       midPx,
       midPy,
+      knobX,
+      knobY,
       transPx,
       transPy,
     };
@@ -514,19 +539,6 @@
             >
               0%
             </text>
-            <!-- Visible 50% drag knob: small yellow diamond on the mid line, on the AB axis. -->
-            <rect
-              x={guides.midPx - 5}
-              y={guides.midPy - 5}
-              width="10"
-              height="10"
-              fill="#facc15"
-              stroke="#000"
-              stroke-width="1"
-              transform="rotate(45 {guides.midPx} {guides.midPy})"
-              style="cursor: grab;"
-              onpointerdown={(e) => dragLinearMid(e, i, mask)}
-            />
           {/if}
           <!-- Connecting axis from A → B (gradient direction). -->
           <line
@@ -540,7 +552,8 @@
             pointer-events="none"
           />
           {#if guides}
-            <!-- Translate handle: at the literal midpoint of AB (separate from the falloff knob). -->
+            <!-- Translate handle: at the literal midpoint of AB. Rendered before
+                 the mid knob so when both happen to coincide, the knob wins. -->
             <circle
               cx={guides.transPx}
               cy={guides.transPy}
@@ -551,6 +564,32 @@
               stroke-width="1.5"
               style="cursor: move;"
               onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
+            />
+            <!-- Connector tick: short line from the AB axis to the offset knob,
+                 so the user reads the knob as belonging to the mid line. -->
+            <line
+              x1={guides.midPx}
+              y1={guides.midPy}
+              x2={guides.knobX}
+              y2={guides.knobY}
+              stroke="#facc15"
+              stroke-width="1.5"
+              pointer-events="none"
+            />
+            <!-- 50% drag knob: yellow diamond, offset perpendicular from the AB
+                 axis so it's clearly distinct from the translate dot and is
+                 always reachable regardless of mid value. -->
+            <rect
+              x={guides.knobX - 6}
+              y={guides.knobY - 6}
+              width="12"
+              height="12"
+              fill="#facc15"
+              stroke="#000"
+              stroke-width="1"
+              transform="rotate(45 {guides.knobX} {guides.knobY})"
+              style="cursor: grab;"
+              onpointerdown={(e) => dragLinearMid(e, i, mask)}
             />
           {/if}
           <circle
