@@ -239,12 +239,19 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
     }
     const nx = vx / lenSq;
     const ny = vy / lenSq;
+    // Falloff midpoint: t value where weight = 0.5. Default 0.5 = pure linear.
+    // Off-center mid gives a piecewise-linear remap of t before the smoothstep
+    // so the user can pull the soft transition closer to A or B.
+    const mid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5));
+    const invMid = 0.5 / mid;
+    const invComp = 0.5 / (1 - mid);
     return {
       sliders,
       weight: (x, y) => {
         const t = (x - ax) * nx + (y - ay) * ny;
         const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
-        return 1 - clamped * clamped * (3 - 2 * clamped);
+        const r = clamped <= mid ? clamped * invMid : 0.5 + (clamped - mid) * invComp;
+        return 1 - r * r * (3 - 2 * r);
       },
     };
   }

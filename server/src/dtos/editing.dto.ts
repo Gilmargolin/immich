@@ -141,6 +141,17 @@ export class LinearMask {
   @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized y of point B (weight=0)' })
   by!: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0.05)
+  @Max(0.95)
+  @ApiProperty({
+    required: false,
+    description:
+      'Position along AB where weight = 0.5 (0..1, default 0.5). Move toward A or B to bias the falloff curve away from a pure linear ramp.',
+  })
+  mid?: number;
+
   @ValidateNested()
   @Type(() => AdjustmentSliders)
   @ApiProperty({ description: 'Adjustments to apply where this mask has weight > 0' })

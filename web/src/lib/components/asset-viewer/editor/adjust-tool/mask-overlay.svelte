@@ -132,6 +132,31 @@
     });
   };
 
+  // Drag the 50% line / its handle along AB to bias the falloff curve. We
+  // project the cursor onto AB in pixel space (svgWidth/svgHeight match the
+  // canvas, which has the image's aspect ratio, so the projection is the
+  // same the shader will see).
+  const dragLinearMid = (e: PointerEvent, idx: number, mask: LinearMask) => {
+    adjustManager.selectMask(idx);
+    const ax = mask.ax * svgWidth;
+    const ay = mask.ay * svgHeight;
+    const bx = mask.bx * svgWidth;
+    const by = mask.by * svgHeight;
+    const vx = bx - ax;
+    const vy = by - ay;
+    const lenSq = vx * vx + vy * vy;
+    if (lenSq < 1) {
+      return;
+    }
+    startDrag(e, ({ nx, ny }) => {
+      const px = nx * svgWidth;
+      const py = ny * svgHeight;
+      const t = ((px - ax) * vx + (py - ay) * vy) / lenSq;
+      const newMid = Math.max(0.1, Math.min(0.9, t));
+      adjustManager.updateMask(idx, { ...mask, mid: newMid });
+    });
+  };
+
   // ---------- Radial mask handle drag ----------
 
   const dragRadialCenter = (e: PointerEvent, idx: number, mask: RadialMask) => {
@@ -257,11 +282,6 @@
     by: m.by * svgHeight,
   });
 
-  const linearMid = (m: LinearMask) => ({
-    mx: ((m.ax + m.bx) / 2) * svgWidth,
-    my: ((m.ay + m.by) / 2) * svgHeight,
-  });
-
   // Lightroom-style guides: three parallel lines perpendicular to AB at the
   // 100% / 50% / 0% effect positions. Iso-strength of the linear mask is
   // perpendicular to AB (see maskWeight in adjust-shader.ts), so these lines
@@ -282,13 +302,21 @@
     const nx = -dy / len;
     const ny = dx / len;
     const ext = Math.max(svgWidth, svgHeight) * 2;
-    const mx = (ax + bx) / 2;
-    const my = (ay + by) / 2;
+    // 50%-effect line is at A + mid*(B-A) (NOT the literal midpoint), so the
+    // user can pull the soft falloff toward A or B and see the band shift.
+    const midT = m.mid ?? 0.5;
+    const midPx = ax + dx * midT;
+    const midPy = ay + dy * midT;
+    // Translate-handle stays at the literal midpoint of A/B so the user has
+    // a stable grip for moving the whole gradient even when the falloff is
+    // biased away from center.
+    const transPx = (ax + bx) / 2;
+    const transPy = (ay + by) / 2;
     return {
       // Full-effect line (at A, perpendicular to AB).
       full: { x1: ax - nx * ext, y1: ay - ny * ext, x2: ax + nx * ext, y2: ay + ny * ext },
-      // 50% effect line (at midpoint).
-      mid: { x1: mx - nx * ext, y1: my - ny * ext, x2: mx + nx * ext, y2: my + ny * ext },
+      // 50% effect line (perpendicular through A + mid*(B-A)).
+      mid: { x1: midPx - nx * ext, y1: midPy - ny * ext, x2: midPx + nx * ext, y2: midPy + ny * ext },
       // Zero-effect line (at B).
       zero: { x1: bx - nx * ext, y1: by - ny * ext, x2: bx + nx * ext, y2: by + ny * ext },
       // Label anchor offset along the perpendicular so the text doesn't sit
@@ -298,6 +326,10 @@
       ay,
       bx,
       by,
+      midPx,
+      midPy,
+      transPx,
+      transPy,
     };
   };
 
@@ -412,7 +444,6 @@
     {#if i === editingIndex}
       {#if mask.kind === 'linear'}
         {@const px = linearPx(mask)}
-        {@const mid = linearMid(mask)}
         {@const guides = linearGuides(mask)}
         <g>
           {#if guides}
@@ -425,6 +456,17 @@
               stroke="white"
               stroke-width="1.5"
               pointer-events="none"
+            />
+            <!-- Mid line: invisible thick hit-area for dragging, then the visible dashed line. -->
+            <line
+              x1={guides.mid.x1}
+              y1={guides.mid.y1}
+              x2={guides.mid.x2}
+              y2={guides.mid.y2}
+              stroke="transparent"
+              stroke-width="14"
+              style="cursor: grab;"
+              onpointerdown={(e) => dragLinearMid(e, i, mask)}
             />
             <line
               x1={guides.mid.x1}
@@ -472,6 +514,19 @@
             >
               0%
             </text>
+            <!-- Visible 50% drag knob: small yellow diamond on the mid line, on the AB axis. -->
+            <rect
+              x={guides.midPx - 5}
+              y={guides.midPy - 5}
+              width="10"
+              height="10"
+              fill="#facc15"
+              stroke="#000"
+              stroke-width="1"
+              transform="rotate(45 {guides.midPx} {guides.midPy})"
+              style="cursor: grab;"
+              onpointerdown={(e) => dragLinearMid(e, i, mask)}
+            />
           {/if}
           <!-- Connecting axis from A → B (gradient direction). -->
           <line
@@ -484,17 +539,20 @@
             stroke-dasharray="6 4"
             pointer-events="none"
           />
-          <circle
-            cx={mid.mx}
-            cy={mid.my}
-            r="6"
-            fill="#7dd3fc"
-            fill-opacity="0.5"
-            stroke="#0c4a6e"
-            stroke-width="1.5"
-            style="cursor: move;"
-            onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
-          />
+          {#if guides}
+            <!-- Translate handle: at the literal midpoint of AB (separate from the falloff knob). -->
+            <circle
+              cx={guides.transPx}
+              cy={guides.transPy}
+              r="6"
+              fill="#7dd3fc"
+              fill-opacity="0.5"
+              stroke="#0c4a6e"
+              stroke-width="1.5"
+              style="cursor: move;"
+              onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
+            />
+          {/if}
           <circle
             cx={px.ax}
             cy={px.ay}

@@ -47,6 +47,7 @@ const defaultLinearMask = (): LocalMask => ({
   ay: 0.2,
   bx: 0.5,
   by: 0.6,
+  mid: 0.5,
   params: { ...defaultValues },
 });
 
@@ -275,6 +276,7 @@ export class AdjustManager implements EditToolManager {
       ay,
       bx,
       by,
+      mid: 0.5,
       params: { ...defaultValues },
     };
     this.masks = [...this.masks, mask];

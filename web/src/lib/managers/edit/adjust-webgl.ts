@@ -18,6 +18,9 @@ export type LinearMask = {
   ay: number;
   bx: number;
   by: number;
+  // Optional falloff midpoint along AB (0..1). Defaults to 0.5 = linear ramp.
+  // Moving away from 0.5 biases the soft transition closer to A or B.
+  mid?: number;
   params: AdjustmentSliders;
 };
 
@@ -295,6 +298,8 @@ export class AdjustGLRenderer {
         this.geomABuf[i * 4 + 1] = m.ay;
         this.geomABuf[i * 4 + 2] = m.bx;
         this.geomABuf[i * 4 + 3] = m.by;
+        // For linear masks, geomB[0] carries the falloff midpoint (0..1).
+        this.geomBBuf[i * 4 + 0] = m.mid ?? 0.5;
       } else {
         this.kindBuf[i] = 1;
         this.geomABuf[i * 4 + 0] = m.cx;

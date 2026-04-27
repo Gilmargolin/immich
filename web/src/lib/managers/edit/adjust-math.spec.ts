@@ -118,6 +118,28 @@ describe('applyAdjustToPixel — local masks', () => {
     expect(bottom.r).toBeLessThan(190);
   });
 
+  it('linear-gradient mid biased toward A pulls the falloff toward A (so the band near B sees less effect)', () => {
+    // AB runs y=0..50 in a 100×100 image. mid=0.2 means the 50% line sits
+    // 20% along AB (y=10), so by y=25 the weight has dropped well below 0.5.
+    const biasA: LocalMask = {
+      kind: 'linear',
+      ax: 0.5,
+      ay: 0,
+      bx: 0.5,
+      by: 0.5,
+      mid: 0.2,
+      params: { ...ZERO, brightness: -1 },
+    };
+    const linear: LocalMask = { ...biasA, mid: 0.5 };
+
+    // At y=25 (the literal midpoint of AB), the linear mask is at 50% effect
+    // and the biased mask is well past that threshold (lower weight = brighter).
+    const sampleLinear = applyAt([180, 180, 180], {}, [linear], 100, 100, 50, 25);
+    const sampleBiased = applyAt([180, 180, 180], {}, [biasA], 100, 100, 50, 25);
+
+    expect(sampleBiased.r).toBeGreaterThan(sampleLinear.r);
+  });
+
   it('radial mask with brightness -1 darkens inside, leaves corner alone', () => {
     const mask: LocalMask = {
       kind: 'radial',

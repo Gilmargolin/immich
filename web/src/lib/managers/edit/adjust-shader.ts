@@ -150,7 +150,11 @@ float maskWeight(int idx, vec2 px) {
     float lenSq = dot(v, v);
     if (lenSq < 1e-6) return 0.0;
     float t = clamp(dot(px - a, v) / lenSq, 0.0, 1.0);
-    return 1.0 - t * t * (3.0 - 2.0 * t);
+    // Falloff midpoint (0..1, default 0.5). Piecewise-linear remap so that
+    // t == mid maps to 0.5, then the smoothstep below shapes the curve.
+    float mid = clamp(u_maskGeomB[idx].x, 0.05, 0.95);
+    float r = t <= mid ? (t * 0.5) / mid : 0.5 + ((t - mid) * 0.5) / (1.0 - mid);
+    return 1.0 - r * r * (3.0 - 2.0 * r);
   }
   float minDim = min(u_imageSize.x, u_imageSize.y);
   vec2 c = u_maskGeomA[idx].xy * u_imageSize;

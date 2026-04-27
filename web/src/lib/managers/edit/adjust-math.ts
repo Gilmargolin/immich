@@ -136,7 +136,9 @@ export const maskWeight = (mask: LocalMask, px: number, py: number, width: numbe
     }
     const t = ((px - ax) * vx + (py - ay) * vy) / lenSq;
     const c = t < 0 ? 0 : t > 1 ? 1 : t;
-    return 1 - c * c * (3 - 2 * c);
+    const mid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5));
+    const r = c <= mid ? (c * 0.5) / mid : 0.5 + ((c - mid) * 0.5) / (1 - mid);
+    return 1 - r * r * (3 - 2 * r);
   }
 
   const minDim = Math.min(width, height);
