@@ -183,7 +183,12 @@ void main() {
     u_tint, u_highlights, u_shadows, u_whitePoint, u_blackPoint
   );
 
-  vec2 px = v_texCoord * u_imageSize;
+  // v_texCoord runs (0,0) at the BOTTOM-left of the canvas (WebGL Y-up
+  // convention) while the mask DTO and SVG overlay use Y top-to-bottom
+  // (also the server's pixel-buffer iteration order). Flip Y here so the
+  // live preview's affected area lines up with the red overlay and matches
+  // what the server produces on save.
+  vec2 px = vec2(v_texCoord.x, 1.0 - v_texCoord.y) * u_imageSize;
   for (int i = 0; i < MAX_MASKS; ++i) {
     if (i >= u_maskCount) break;
     float w = maskWeight(i, px);

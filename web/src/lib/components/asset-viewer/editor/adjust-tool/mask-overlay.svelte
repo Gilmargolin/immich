@@ -262,6 +262,45 @@
     my: ((m.ay + m.by) / 2) * svgHeight,
   });
 
+  // Lightroom-style guides: three parallel lines perpendicular to AB at the
+  // 100% / 50% / 0% effect positions. Iso-strength of the linear mask is
+  // perpendicular to AB (see maskWeight in adjust-shader.ts), so these lines
+  // visually communicate exactly where each level of effect lands. Lines are
+  // extended far past the canvas; the SVG's overflow:hidden clips them.
+  const linearGuides = (m: LinearMask) => {
+    const ax = m.ax * svgWidth;
+    const ay = m.ay * svgHeight;
+    const bx = m.bx * svgWidth;
+    const by = m.by * svgHeight;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) {
+      return null;
+    }
+    // Unit perpendicular to AB.
+    const nx = -dy / len;
+    const ny = dx / len;
+    const ext = Math.max(svgWidth, svgHeight) * 2;
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    return {
+      // Full-effect line (at A, perpendicular to AB).
+      full: { x1: ax - nx * ext, y1: ay - ny * ext, x2: ax + nx * ext, y2: ay + ny * ext },
+      // 50% effect line (at midpoint).
+      mid: { x1: mx - nx * ext, y1: my - ny * ext, x2: mx + nx * ext, y2: my + ny * ext },
+      // Zero-effect line (at B).
+      zero: { x1: bx - nx * ext, y1: by - ny * ext, x2: bx + nx * ext, y2: by + ny * ext },
+      // Label anchor offset along the perpendicular so the text doesn't sit
+      // on top of the guide line.
+      labelOffset: { dx: nx * 14, dy: ny * 14 },
+      ax,
+      ay,
+      bx,
+      by,
+    };
+  };
+
   const radialPx = (m: RadialMask) => ({
     cx: m.cx * svgWidth,
     cy: m.cy * svgHeight,
@@ -374,7 +413,67 @@
       {#if mask.kind === 'linear'}
         {@const px = linearPx(mask)}
         {@const mid = linearMid(mask)}
+        {@const guides = linearGuides(mask)}
         <g>
+          {#if guides}
+            <!-- Three parallel perpendicular lines: full / mid / zero effect. -->
+            <line
+              x1={guides.full.x1}
+              y1={guides.full.y1}
+              x2={guides.full.x2}
+              y2={guides.full.y2}
+              stroke="white"
+              stroke-width="1.5"
+              pointer-events="none"
+            />
+            <line
+              x1={guides.mid.x1}
+              y1={guides.mid.y1}
+              x2={guides.mid.x2}
+              y2={guides.mid.y2}
+              stroke="white"
+              stroke-opacity="0.7"
+              stroke-width="1"
+              stroke-dasharray="2 4"
+              pointer-events="none"
+            />
+            <line
+              x1={guides.zero.x1}
+              y1={guides.zero.y1}
+              x2={guides.zero.x2}
+              y2={guides.zero.y2}
+              stroke="white"
+              stroke-width="1.5"
+              pointer-events="none"
+            />
+            <text
+              x={guides.ax + guides.labelOffset.dx}
+              y={guides.ay + guides.labelOffset.dy}
+              fill="white"
+              font-size="11"
+              font-family="system-ui, sans-serif"
+              text-anchor="middle"
+              dominant-baseline="middle"
+              pointer-events="none"
+              style="paint-order: stroke; stroke: rgba(0,0,0,0.6); stroke-width: 3;"
+            >
+              100%
+            </text>
+            <text
+              x={guides.bx + guides.labelOffset.dx}
+              y={guides.by + guides.labelOffset.dy}
+              fill="white"
+              font-size="11"
+              font-family="system-ui, sans-serif"
+              text-anchor="middle"
+              dominant-baseline="middle"
+              pointer-events="none"
+              style="paint-order: stroke; stroke: rgba(0,0,0,0.6); stroke-width: 3;"
+            >
+              0%
+            </text>
+          {/if}
+          <!-- Connecting axis from A → B (gradient direction). -->
           <line
             x1={px.ax}
             y1={px.ay}

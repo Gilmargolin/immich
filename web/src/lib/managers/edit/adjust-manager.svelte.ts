@@ -223,6 +223,13 @@ export class AdjustManager implements EditToolManager {
       this.masks = this.masks.map((m, i) =>
         i === idx ? ({ ...m, params: { ...m.params, [key]: value } } as LocalMask) : m,
       );
+      // Once the user starts adjusting sliders for a mask, hide the red
+      // affected-area overlay — they've already seen where it applies and the
+      // overlay just gets in the way of judging the result. Pencil button
+      // re-enters geometry edit on demand.
+      if (this.editingMaskIndex === idx) {
+        this.editingMaskIndex = null;
+      }
       return;
     }
     this.values = { ...this.values, [key]: value };
@@ -230,12 +237,16 @@ export class AdjustManager implements EditToolManager {
 
   addLinearMask(): void {
     this.masks = [...this.masks, defaultLinearMask()];
-    this.selectedMaskIndex = this.masks.length - 1;
+    const idx = this.masks.length - 1;
+    this.selectedMaskIndex = idx;
+    this.editingMaskIndex = idx;
   }
 
   addRadialMask(): void {
     this.masks = [...this.masks, defaultRadialMask()];
-    this.selectedMaskIndex = this.masks.length - 1;
+    const idx = this.masks.length - 1;
+    this.selectedMaskIndex = idx;
+    this.editingMaskIndex = idx;
   }
 
   // Lightroom-style draw flow: arm draw mode and let the overlay component
@@ -267,7 +278,9 @@ export class AdjustManager implements EditToolManager {
       params: { ...defaultValues },
     };
     this.masks = [...this.masks, mask];
-    this.selectedMaskIndex = this.masks.length - 1;
+    const idx = this.masks.length - 1;
+    this.selectedMaskIndex = idx;
+    this.editingMaskIndex = idx;
     this.pendingMaskKind = null;
   }
 
@@ -290,7 +303,9 @@ export class AdjustManager implements EditToolManager {
       params: { ...defaultValues },
     };
     this.masks = [...this.masks, mask];
-    this.selectedMaskIndex = this.masks.length - 1;
+    const idx = this.masks.length - 1;
+    this.selectedMaskIndex = idx;
+    this.editingMaskIndex = idx;
     this.pendingMaskKind = null;
   }
 
