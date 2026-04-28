@@ -1,5 +1,6 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
+  import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { getAssetMediaUrl } from '$lib/utils';
   import { getAltText } from '$lib/utils/thumbnail-util';
@@ -33,6 +34,8 @@
   let imageSrc = $derived(
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
   );
+  // Hold-to-compare URL (default `edited: true` returns the saved/edited preview).
+  let savedSrc = $derived(getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, size: AssetMediaSize.Preview }));
 
   // Force browser to re-evaluate SVG filter when adjust params change.
   // Browsers cache SVG filter results and may not re-render when filter attributes update.
@@ -272,6 +275,16 @@
         bind:this={transformManager.overlayEl}
       ></div>
     </button>
+    {#if editManager.showOriginal}
+      <!-- Hold-to-compare overlay confined to crop-viewport so the rotation
+           dial below stays visible and the layout doesn't shift. -->
+      <img
+        src={savedSrc}
+        alt="Saved version"
+        class="compare-overlay"
+        draggable="false"
+      />
+    {/if}
   </div>
 
   <!-- Rotation dial below the image -->
@@ -328,6 +341,18 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    position: relative;
+  }
+
+  .compare-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+    z-index: 10;
+    pointer-events: none;
   }
 
   .crop-area {

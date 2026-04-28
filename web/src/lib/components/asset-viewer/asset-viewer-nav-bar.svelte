@@ -6,8 +6,10 @@
   import ArchiveAction from '$lib/components/asset-viewer/actions/archive-action.svelte';
   import DeleteAction from '$lib/components/asset-viewer/actions/delete-action.svelte';
   import KeepThisDeleteOthersAction from '$lib/components/asset-viewer/actions/keep-this-delete-others.svelte';
+  import PasteAdjustmentsToAssetAction from '$lib/components/asset-viewer/actions/paste-adjustments-to-asset-action.svelte';
   import RatingAction from '$lib/components/asset-viewer/actions/rating-action.svelte';
   import RemoveAssetFromStack from '$lib/components/asset-viewer/actions/remove-asset-from-stack.svelte';
+  import RemoveMotionAction from '$lib/components/asset-viewer/actions/remove-motion-action.svelte';
   import RemoveFromAlbumAction from '$lib/components/timeline/actions/RemoveFromAlbumAction.svelte';
   import RestoreAction from '$lib/components/asset-viewer/actions/restore-action.svelte';
   import SetAlbumCoverAction from '$lib/components/asset-viewer/actions/set-album-cover-action.svelte';
@@ -185,6 +187,10 @@
         {/if}
         {#if asset.type === AssetTypeEnum.Image && !isLocked}
           <SetProfilePictureAction {asset} />
+        {/if}
+        {#if isOwner && asset.type === AssetTypeEnum.Image && !asset.isTrashed && !isLocked}
+          <PasteAdjustmentsToAssetAction {asset} />
+          <RemoveMotionAction {asset} />
         {/if}
 
         {#if !isLocked}

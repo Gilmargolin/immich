@@ -17,6 +17,9 @@
   let imageUrl = $derived(
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
   );
+  // For hold-to-compare: the server-rendered saved preview (with previously-
+  // applied edits baked in). Default `edited: true` is what we want.
+  let savedUrl = $derived(getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, size: AssetMediaSize.Preview }));
 
   // Fallback path only — used when WebGL isn't available. SVG filter can do the
   // global per-pixel-value adjustments via feComponentTransfer + saturation
@@ -56,7 +59,7 @@
 
 <div class="flex h-full w-full items-center justify-center">
   {#if !useFallback}
-    <AdjustCanvasPreview src={imageUrl} onWebglUnavailable={() => (useFallback = true)}>
+    <AdjustCanvasPreview src={imageUrl} compareSrc={savedUrl} onWebglUnavailable={() => (useFallback = true)}>
       <MaskOverlay />
     </AdjustCanvasPreview>
   {:else}

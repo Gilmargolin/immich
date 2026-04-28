@@ -1,15 +1,17 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
+  import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { AdjustGLRenderer, FULL_CROP, type CropRect } from '$lib/managers/edit/adjust-webgl';
   import { onDestroy, onMount, type Snippet } from 'svelte';
 
   interface Props {
     src: string;
+    compareSrc?: string;
     onWebglUnavailable?: () => void;
     children?: Snippet;
   }
 
-  let { src, onWebglUnavailable, children }: Props = $props();
+  let { src, compareSrc, onWebglUnavailable, children }: Props = $props();
 
   let canvas = $state<HTMLCanvasElement | null>(null);
   let renderer: AdjustGLRenderer | null = null;
@@ -169,6 +171,18 @@
       class="absolute inset-0 h-full w-full"
       aria-label="Adjust preview"
     ></canvas>
+    {#if editManager.showOriginal && compareSrc}
+      <!-- Hold-to-compare overlay: shows the saved (server-rendered) preview
+           at exactly the same fitted dimensions as the WebGL canvas. Confined
+           to the canvas area so the surrounding UI (rotation dial, sidebar)
+           doesn't shift when the user holds the eye button. -->
+      <img
+        src={compareSrc}
+        alt="Saved version"
+        class="absolute inset-0 h-full w-full object-fill"
+        draggable="false"
+      />
+    {/if}
     {#if children}
       {@render children()}
     {/if}

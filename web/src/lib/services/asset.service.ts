@@ -235,11 +235,15 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
   const Edit: ActionItem = {
     title: $t('editor'),
     icon: mdiTune,
+    // Live photos (livePhotoVideoId set) are allowed: editing operates on the
+    // still part only, so the saved derived preview is a still image. The
+    // motion video stays linked to the asset and continues to play in the
+    // viewer; users who want to drop the motion can use the dedicated
+    // "Remove motion video" menu action.
     $if: () =>
       !sharedLink &&
       isOwner &&
       asset.type === AssetTypeEnum.Image &&
-      !asset.livePhotoVideoId &&
       asset.exifInfo?.projectionType !== ProjectionType.EQUIRECTANGULAR &&
       !asset.originalPath.toLowerCase().endsWith('.insp') &&
       !asset.originalPath.toLowerCase().endsWith('.gif') &&
