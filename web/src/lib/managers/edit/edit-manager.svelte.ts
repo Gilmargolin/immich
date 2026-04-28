@@ -62,6 +62,11 @@ export class EditManager {
   /** When true, show CropArea viewer; otherwise show AdjustArea */
   isCropMode = $state(false);
 
+  /** Hold-to-compare: while true, the editor area renders an overlay of the
+   * currently-saved version of the asset so the user can A/B against pending
+   * edits. Wired to a press-and-hold button in the editor toolbar. */
+  showOriginal = $state(false);
+
   hasUnsavedChanges = $derived(this.tools.some((t) => t.manager.hasChanges) && !this.hasAppliedEdits);
   canReset = $derived(this.tools.some((t) => t.manager.canReset));
 
@@ -142,6 +147,7 @@ export class EditManager {
     this.activatedTools.clear();
     this.currentAsset = null;
     this.isCropMode = false;
+    this.showOriginal = false;
     this.selectedTool = null;
   }
 

@@ -12,6 +12,7 @@
     mdiContentCopy,
     mdiCrop,
     mdiDelete,
+    mdiEye,
     mdiFlipHorizontal,
     mdiFlipVertical,
     mdiGradientHorizontal,
@@ -202,6 +203,31 @@
       <p class="text-lg text-immich-fg dark:text-immich-dark-fg capitalize">{$t('editor')}</p>
     </HStack>
     <HStack class="gap-1">
+      <!-- Hold-to-compare: while pressed, the editor area shows the saved
+           version of the asset (server-rendered, with previously-applied
+           edits). Uses pointer capture so a release outside the button still
+           toggles the overlay back off. -->
+      <button
+        type="button"
+        class="rounded-full p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors {editManager.showOriginal ? 'bg-gray-300 dark:bg-gray-600' : ''}"
+        aria-label="Hold to see saved version"
+        title="Hold to compare against saved version"
+        onpointerdown={(e) => {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          editManager.showOriginal = true;
+        }}
+        onpointerup={() => {
+          editManager.showOriginal = false;
+        }}
+        onpointercancel={() => {
+          editManager.showOriginal = false;
+        }}
+        onpointerleave={() => {
+          editManager.showOriginal = false;
+        }}
+      >
+        <Icon icon={mdiEye} size="20" />
+      </button>
       <IconButton
         shape="round"
         size="small"

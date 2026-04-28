@@ -25,7 +25,9 @@
   import { InvocationTracker } from '$lib/utils/invocationTracker';
   import { SlideshowHistory } from '$lib/utils/slideshow-history';
   import { toTimelineAsset } from '$lib/utils/timeline-util';
+  import { getAssetMediaUrl } from '$lib/utils';
   import {
+    AssetMediaSize,
     AssetTypeEnum,
     getAssetInfo,
     getStack,
@@ -540,7 +542,27 @@
       <CropArea {asset} />
     {:else if viewerKind === 'AdjustArea'}
       <AdjustArea {asset} />
-    {:else if viewerKind === 'PhotoViewer'}
+    {/if}
+
+    <!-- Hold-to-compare overlay: shows the currently-saved version of the
+         asset (with previously-applied edits baked in) on top of the live
+         editor canvas. Toggled by the eye button in the editor toolbar. -->
+    {#if (viewerKind === 'CropArea' || viewerKind === 'AdjustArea') && editManager.showOriginal}
+      <div class="absolute inset-0 z-30 flex items-center justify-center bg-immich-bg dark:bg-immich-dark-bg">
+        <img
+          src={getAssetMediaUrl({
+            id: asset.id,
+            cacheKey: asset.thumbhash,
+            size: AssetMediaSize.Preview,
+          })}
+          alt="Saved version"
+          class="max-h-full max-w-full object-contain"
+          draggable="false"
+        />
+      </div>
+    {/if}
+
+    {#if viewerKind === 'PhotoViewer'}
       <PhotoViewer cursor={{ ...cursor, current: asset }} {sharedLink} {onSwipe} />
     {:else if viewerKind === 'VideoViewer'}
       <VideoViewer

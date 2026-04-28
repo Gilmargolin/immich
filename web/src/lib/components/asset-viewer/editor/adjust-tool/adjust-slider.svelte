@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon } from '@immich/ui';
+  import { mdiRestore } from '@mdi/js';
 
   interface Props {
     icon: string;
@@ -43,4 +44,14 @@
   <span class="w-8 text-xs text-gray-400 text-end tabular-nums">
     {Math.round(value * 100)}
   </span>
+  <button
+    type="button"
+    class="shrink-0 rounded p-0.5 text-gray-400 hover:text-white hover:bg-gray-700 disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400"
+    disabled={value === 0}
+    onclick={handleReset}
+    aria-label="Reset {label}"
+    title="Reset {label} to default"
+  >
+    <Icon icon={mdiRestore} size="14" />
+  </button>
 </div>

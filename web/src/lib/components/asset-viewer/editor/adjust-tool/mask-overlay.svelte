@@ -409,6 +409,7 @@
       {#if i === editingIndex}
         {#if mask.kind === 'linear'}
           {@const lp = linearPx(mask)}
+          {@const linMid = Math.max(0.05, Math.min(0.95, mask.mid ?? 0.5))}
           <linearGradient
             id="mask-overlay-grad-{i}"
             x1={lp.ax}
@@ -417,7 +418,13 @@
             y2={lp.by}
             gradientUnits="userSpaceOnUse"
           >
+            <!-- Stops match the shader's piecewise mid remap: weight = 1 at
+                 offset 0, weight = 0.5 at offset = mid, weight = 0 at offset 1.
+                 Without the mid stop the red tint stays a pure linear ramp
+                 even when the falloff curve is biased, which makes the visual
+                 lie about where the effect actually peaks. -->
             <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset={linMid} stop-color="#ef4444" stop-opacity="0.15" />
             <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
           </linearGradient>
         {:else}
