@@ -565,9 +565,9 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Only images can be edited');
     }
 
-    if (asset.livePhotoVideoId) {
-      throw new BadRequestException('Editing live photos is not supported');
-    }
+    // Live photos: edit operates on the still part. The motion video stays
+    // linked to the asset; users who want a clean still use the dedicated
+    // "Remove motion video" action.
 
     if (isPanorama(asset)) {
       throw new BadRequestException('Editing panorama images is not supported');
