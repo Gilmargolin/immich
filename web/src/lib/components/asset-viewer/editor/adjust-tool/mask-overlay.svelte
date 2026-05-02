@@ -198,20 +198,22 @@
   };
 
   // Schema bound on RadialMask.feather (server: editing.dto.ts).
-  const FEATHER_MAX = 8;
-
-  // Feather knob lives on the upward y-axis above the main ellipse top, with
-  // a sqrt mapping so the knob stays reachable across the wide [0, FEATHER_MAX]
-  // range:
-  //   knob distance from center  D = (1 + sqrt(feather)) · ry
-  //     feather=0 → D = ry        (knob on main top, sharp edge)
-  //     feather=1 → D = 2·ry
-  //     feather=4 → D = 3·ry
-  //     feather=8 → D ≈ 3.83·ry
-  // Drag mapping (inverse): t = d/ry - 1; feather = clamp(t·t, 0, FEATHER_MAX).
-  // The actual outer-halo ellipse is still drawn at (1 + feather)·r, which
-  // diverges from the knob at high feather — the gap is intentional and shows
-  // the user how aggressively they're feathering.
+  const FEATHER_MAX = 100;
+  // Knob travel along the upward y-axis, in units of ry (semi-axis):
+  //   D ∈ [ry, ry · (1 + KNOB_MAX_OFFSET)]
+  const KNOB_MAX_OFFSET = 3;
+  // Logarithmic mapping so the knob stays reachable across the huge
+  // [0, FEATHER_MAX] range:
+  //   D = ry · (1 + ln(1 + feather) / ln(1 + FEATHER_MAX) · KNOB_MAX_OFFSET)
+  //   feather=0   → D = ry        (main top, sharp)
+  //   feather=1   → D ≈ 1.45·ry
+  //   feather=10  → D ≈ 2.56·ry
+  //   feather=100 → D = 4·ry      (knob limit; covers full schema range)
+  // Drag inverse: t = (D/ry - 1) / KNOB_MAX_OFFSET; feather = (1+MAX)^t - 1.
+  // The actual outer-halo ellipse is drawn at the true (1+feather)·r and
+  // can extend far past the knob — that gap intentionally shows how broad
+  // the falloff is.
+  const FEATHER_LOG_BASE = Math.log(1 + FEATHER_MAX);
   const dragRadialFeather = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
     const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
@@ -219,8 +221,8 @@
     startDrag(e, ({ ny }) => {
       // Distance ABOVE center along the y-axis (negative drags clamp to 0).
       const distFromCenter = Math.max(0, cyPx - ny * svgHeight);
-      const t = Math.max(0, distFromCenter / ryPx - 1);
-      const feather = Math.max(0, Math.min(FEATHER_MAX, t * t));
+      const t = Math.min(1, Math.max(0, distFromCenter / ryPx - 1) / KNOB_MAX_OFFSET);
+      const feather = Math.max(0, Math.min(FEATHER_MAX, Math.exp(t * FEATHER_LOG_BASE) - 1));
       adjustManager.updateMask(idx, { ...mask, feather });
     });
   };
@@ -687,7 +689,7 @@
       {:else}
         {@const px = radialPx(mask)}
         {@const featherEnd = 1 + mask.feather}
-        {@const featherKnobD = px.ry * (1 + Math.sqrt(mask.feather))}
+        {@const featherKnobD = px.ry * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET)}
         {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
         {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
         <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
