@@ -13,9 +13,10 @@ export const normalizeTransformEdits = (
 } => {
   const { a, b, c, d } = buildAffineFromEdits(edits);
 
-  // Use atan2 for robust angle extraction that works with arbitrary angles
-  // The matrix encodes rotation as: a=cos, b=-sin, c=sin, d=cos (negated due to coordinate system)
-  const rotation = ((-Math.atan2(c, a)) * 180) / Math.PI;
+  // Recover the stored angle that buildAffineFromEdits encoded as
+  // rotate(-angle*π/180). The library matrix has b=sin, c=-sin, so
+  // matrix_angle = atan2(b, a) and stored_angle = -matrix_angle = atan2(c, a).
+  const rotation = (Math.atan2(c, a) * 180) / Math.PI;
   const normalizedRotation = rotation < 0 ? 360 + rotation : rotation;
 
   // Detect mirroring by checking if the determinant is negative
