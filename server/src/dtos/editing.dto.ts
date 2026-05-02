@@ -178,12 +178,13 @@ export class RadialMask {
   angle!: number;
   @IsNumber()
   @Min(0)
-  @Max(2)
+  @Max(8)
   @ApiProperty({
     description:
-      'Edge feather. 0 = sharp at the ellipse boundary. ' +
-      '0 < f ≤ 1 = falloff inside the ellipse: weight=1 inside (1-f)·r, falls to 0 at r. ' +
-      '1 < f ≤ 2 = falloff extends past the ellipse: weight=1 at center, falls to 0 at f·r.',
+      'Width of the outer falloff halo, as a fraction of the semi-axis. ' +
+      'The drawn ellipse is always the solid inner boundary (weight = 1 ' +
+      'anywhere inside). Weight transitions from 1 at the ellipse to 0 at ' +
+      '(1 + feather)·r outside. 0 = sharp edge.',
   })
   feather!: number;
   @IsBoolean()

@@ -197,12 +197,21 @@
     });
   };
 
-  // Feather knob lives on the outer halo top (above the main ellipse).
-  //   knob distance from center  D = (1 + feather) · ry
+  // Schema bound on RadialMask.feather (server: editing.dto.ts).
+  const FEATHER_MAX = 8;
+
+  // Feather knob lives on the upward y-axis above the main ellipse top, with
+  // a sqrt mapping so the knob stays reachable across the wide [0, FEATHER_MAX]
+  // range:
+  //   knob distance from center  D = (1 + sqrt(feather)) · ry
   //     feather=0 → D = ry        (knob on main top, sharp edge)
-  //     feather=1 → D = 2·ry      (knob one radius above main, soft)
-  //     feather=2 → D = 3·ry      (knob two radii above main, very soft)
-  // Drag mapping (inverse): feather = clamp(d/ry - 1, 0, 2).
+  //     feather=1 → D = 2·ry
+  //     feather=4 → D = 3·ry
+  //     feather=8 → D ≈ 3.83·ry
+  // Drag mapping (inverse): t = d/ry - 1; feather = clamp(t·t, 0, FEATHER_MAX).
+  // The actual outer-halo ellipse is still drawn at (1 + feather)·r, which
+  // diverges from the knob at high feather — the gap is intentional and shows
+  // the user how aggressively they're feathering.
   const dragRadialFeather = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
     const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
@@ -210,7 +219,8 @@
     startDrag(e, ({ ny }) => {
       // Distance ABOVE center along the y-axis (negative drags clamp to 0).
       const distFromCenter = Math.max(0, cyPx - ny * svgHeight);
-      const feather = Math.max(0, Math.min(2, distFromCenter / ryPx - 1));
+      const t = Math.max(0, distFromCenter / ryPx - 1);
+      const feather = Math.max(0, Math.min(FEATHER_MAX, t * t));
       adjustManager.updateMask(idx, { ...mask, feather });
     });
   };
@@ -677,7 +687,7 @@
       {:else}
         {@const px = radialPx(mask)}
         {@const featherEnd = 1 + mask.feather}
-        {@const featherKnobD = px.ry * featherEnd}
+        {@const featherKnobD = px.ry * (1 + Math.sqrt(mask.feather))}
         {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
         {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
         <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
