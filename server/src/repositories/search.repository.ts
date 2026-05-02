@@ -8,7 +8,7 @@ import { AssetStatus, AssetType, AssetVisibility, VectorIndex } from 'src/enum';
 import { probes } from 'src/repositories/database.repository';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
-import { anyUuid, searchAssetBuilder, withExifInner } from 'src/utils/database';
+import { anyUuid, asUuid, searchAssetBuilder, withExifInner } from 'src/utils/database';
 import { paginationHelper } from 'src/utils/pagination';
 import { isValidInteger } from 'src/validation';
 
@@ -313,6 +313,77 @@ export class SearchRepository {
   })
   async getEmbedding(assetId: string) {
     return this.db.selectFrom('smart_search').selectAll().where('assetId', '=', assetId).executeTakeFirst();
+  }
+
+  @GenerateSql({
+    params: [{ assetId: DummyValue.UUID, ownerId: DummyValue.UUID, distanceMax: 0.05 }],
+  })
+  async findEditedParent({
+    assetId,
+    ownerId,
+    distanceMax,
+  }: {
+    assetId: string;
+    ownerId: string;
+    distanceMax: number;
+  }) {
+    return this.db.transaction().execute(async (trx) => {
+      await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.Clip])}`.execute(trx);
+
+      const rows = await sql<{
+        id: string;
+        fileCreatedAt: Date;
+        fileModifiedAt: Date;
+        localDateTime: Date;
+        dateTimeOriginal: Date | null;
+        timeZone: string | null;
+        latitude: number | null;
+        longitude: number | null;
+        make: string | null;
+        model: string | null;
+        lensModel: string | null;
+        fNumber: number | null;
+        focalLength: number | null;
+        iso: number | null;
+        exposureTime: string | null;
+        distance: number;
+      }>`
+        with ref as (
+          select embedding from smart_search where "assetId" = ${asUuid(assetId)}
+        )
+        select
+          asset.id,
+          asset."fileCreatedAt",
+          asset."fileModifiedAt",
+          asset."localDateTime",
+          asset_exif."dateTimeOriginal",
+          asset_exif."timeZone",
+          asset_exif.latitude,
+          asset_exif.longitude,
+          asset_exif.make,
+          asset_exif.model,
+          asset_exif."lensModel",
+          asset_exif."fNumber",
+          asset_exif."focalLength",
+          asset_exif.iso,
+          asset_exif."exposureTime",
+          (smart_search.embedding <=> ref.embedding)::float8 as distance
+        from asset
+        inner join smart_search on asset.id = smart_search."assetId"
+        inner join asset_exif on asset.id = asset_exif."assetId"
+        cross join ref
+        where asset."ownerId" = ${asUuid(ownerId)}
+          and asset.id != ${asUuid(assetId)}
+          and asset."deletedAt" is null
+          and asset.type = ${AssetType.Image}
+          and asset."originalFileName" !~* '_edited\.(jpe?g|png)$'
+          and (smart_search.embedding <=> ref.embedding) <= ${distanceMax}
+        order by asset_exif."dateTimeOriginal" asc nulls last,
+                 smart_search.embedding <=> ref.embedding asc
+        limit 1
+      `.execute(trx);
+      return rows.rows[0];
+    });
   }
 
   @GenerateSql({
