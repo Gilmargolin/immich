@@ -16,6 +16,7 @@
     mdiFlipHorizontal,
     mdiFlipVertical,
     mdiGradientHorizontal,
+    mdiInvertColors,
     mdiPencilOutline,
     mdiRotateLeft,
     mdiRotateRight,
@@ -415,6 +416,18 @@
             >
               <Icon icon={mdiPencilOutline} size="14" />
             </button>
+            {#if mask.kind === 'radial'}
+              <button
+                type="button"
+                class="rounded p-1 hover:bg-gray-700
+                  {mask.invert ? 'text-immich-primary' : 'text-gray-300 hover:text-white'}"
+                onclick={() => adjustManager.updateMask(i, { ...mask, invert: !mask.invert })}
+                aria-label={`Invert ${maskLabel(mask, i)}`}
+                title={mask.invert ? 'Invert: applies outside (click to flip)' : 'Invert: applies inside (click to flip)'}
+              >
+                <Icon icon={mdiInvertColors} size="14" />
+              </button>
+            {/if}
             <button
               type="button"
               class="rounded p-1 text-gray-300 hover:text-white hover:bg-gray-700"

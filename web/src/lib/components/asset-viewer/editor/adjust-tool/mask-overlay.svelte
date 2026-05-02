@@ -197,6 +197,24 @@
     });
   };
 
+  // Feather knob lives on the inner dashed ellipse at the local 12 o'clock
+  // position. Dragging it inward (toward center) increases feather (softer
+  // edge); outward (toward outer ellipse) decreases feather (sharper edge).
+  // Position parity with rx/ry: uses raw |Δy| in screen space, same minor
+  // limitation as those when the mask is rotated.
+  const dragRadialFeather = (e: PointerEvent, idx: number, mask: RadialMask) => {
+    adjustManager.selectMask(idx);
+    const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
+    const cyPx = mask.cy * svgHeight;
+    startDrag(e, ({ ny }) => {
+      const distFromCenter = Math.abs(ny * svgHeight - cyPx);
+      const featherInner = Math.max(0, Math.min(1, distFromCenter / ryPx));
+      // Schema bounds: feather ∈ [0, 1].
+      const feather = Math.max(0, Math.min(1, 1 - featherInner));
+      adjustManager.updateMask(idx, { ...mask, feather });
+    });
+  };
+
   // ---------- Draw-mode pointer handlers ----------
 
   const onDrawPointerDown = (e: PointerEvent) => {
@@ -645,6 +663,22 @@
             stroke-width="1"
             stroke-dasharray="3 3"
             pointer-events="none"
+          />
+          <!-- Feather knob: yellow diamond at the top of the inner ellipse.
+               Drag inward to soften, outward to sharpen the edge. -->
+          {@const featherKnobX = px.cx}
+          {@const featherKnobY = px.cy - px.ry * featherInner}
+          <rect
+            x={featherKnobX - 6}
+            y={featherKnobY - 6}
+            width="12"
+            height="12"
+            fill="#facc15"
+            stroke="#000"
+            stroke-width="1"
+            transform="rotate(45 {featherKnobX} {featherKnobY})"
+            style="cursor: grab;"
+            onpointerdown={(e) => dragRadialFeather(e, i, mask)}
           />
           <circle
             cx={px.cx}
