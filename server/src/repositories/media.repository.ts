@@ -265,11 +265,14 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
   const cosA = Math.cos(rad);
   const sinA = Math.sin(rad);
   // featherStart < featherEnd; weight = 1 for d ≤ featherStart, 0 for d ≥ featherEnd.
-  // For feather ∈ [0, 1]: falloff happens inside the ellipse (start = 1-f, end = 1).
-  // For feather ∈ (1, 2]: falloff extends past the ellipse (start = 0, end = f).
-  const f = Math.max(0.001, mask.feather);
-  const featherStart = Math.max(0, 1 - f);
-  const featherEnd = Math.max(1, f);
+  // The drawn ellipse is always the solid inner boundary (weight = 1 anywhere
+  // inside). `feather` is the width of the falloff halo OUTSIDE the ellipse,
+  // expressed as a fraction of the semi-axis.
+  //   feather = 0   → sharp edge at the ellipse boundary
+  //   feather = 1   → halo extends one full radius past the ellipse
+  //   feather = 2   → halo extends two radii past the ellipse
+  const featherStart = 1;
+  const featherEnd = 1 + Math.max(0.001, mask.feather);
   const invert = mask.invert;
 
   return {

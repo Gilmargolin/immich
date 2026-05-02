@@ -197,22 +197,20 @@
     });
   };
 
-  // Feather knob is a slider on the upward y-axis above center, mapping
-  // continuously over the full feather range [0, 2]:
-  //   knob distance from center  D = ry * (1 - feather/2)
-  //     feather=0 → D = ry        (knob at top of main ellipse, sharp edge)
-  //     feather=1 → D = ry/2      (linear falloff from center to edge)
-  //     feather=2 → D = 0         (knob near center, halo extends to 2·r)
-  // Drag mapping (inverse): feather = 2 * (1 - clamp(d/ry, 0, 1)).
+  // Feather knob lives on the outer halo top (above the main ellipse).
+  //   knob distance from center  D = (1 + feather) · ry
+  //     feather=0 → D = ry        (knob on main top, sharp edge)
+  //     feather=1 → D = 2·ry      (knob one radius above main, soft)
+  //     feather=2 → D = 3·ry      (knob two radii above main, very soft)
+  // Drag mapping (inverse): feather = clamp(d/ry - 1, 0, 2).
   const dragRadialFeather = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
     const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
     const cyPx = mask.cy * svgHeight;
     startDrag(e, ({ ny }) => {
-      // Only "above center" matters; clamp negative drags to 0.
+      // Distance ABOVE center along the y-axis (negative drags clamp to 0).
       const distFromCenter = Math.max(0, cyPx - ny * svgHeight);
-      const t = Math.min(1, distFromCenter / ryPx);
-      const feather = Math.max(0, Math.min(2, 2 * (1 - t)));
+      const feather = Math.max(0, Math.min(2, distFromCenter / ryPx - 1));
       adjustManager.updateMask(idx, { ...mask, feather });
     });
   };
@@ -481,8 +479,7 @@
             <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
           </linearGradient>
         {:else}
-          {@const featherStart = Math.max(0, 1 - mask.feather)}
-          {@const featherEnd = Math.max(1, mask.feather)}
+          {@const featherEnd = 1 + mask.feather}
           <radialGradient
             id="mask-overlay-grad-{i}"
             cx={mask.cx * svgWidth}
@@ -493,7 +490,7 @@
             gradientUnits="userSpaceOnUse"
           >
             <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
-            <stop offset={featherStart / featherEnd} stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset={1 / featherEnd} stop-color="#ef4444" stop-opacity="0.3" />
             <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
           </radialGradient>
         {/if}
@@ -508,7 +505,7 @@
         <rect x="0" y="0" width={svgWidth} height={svgHeight} fill="url(#mask-overlay-grad-{i})" pointer-events="none" />
       {:else}
         {@const px = radialPx(mask)}
-        {@const featherEnd = Math.max(1, mask.feather)}
+        {@const featherEnd = 1 + mask.feather}
         <ellipse
           cx={px.cx}
           cy={px.cy}
@@ -679,15 +676,14 @@
         </g>
       {:else}
         {@const px = radialPx(mask)}
-        {@const featherStart = Math.max(0, 1 - mask.feather)}
-        {@const featherEnd = Math.max(1, mask.feather)}
-        {@const featherKnobD = px.ry * (1 - mask.feather / 2)}
+        {@const featherEnd = 1 + mask.feather}
+        {@const featherKnobD = px.ry * featherEnd}
         {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
         {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
         <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
-          <!-- Outer feather boundary (where weight = 0). Coincides with the
-               main ellipse for feather ≤ 1; visibly larger for feather > 1. -->
-          {#if featherEnd > 1.001}
+          <!-- Outer halo (where weight = 0). Only drawn when feather > 0;
+               otherwise it would coincide with the main ellipse. -->
+          {#if mask.feather > 0.001}
             <ellipse
               cx={px.cx}
               cy={px.cy}
@@ -701,7 +697,8 @@
               pointer-events="none"
             />
           {/if}
-          <!-- Main / drawn ellipse. Always shown. -->
+          <!-- Main / drawn ellipse — the solid inner boundary (everything
+               inside is fully affected). -->
           <ellipse
             cx={px.cx}
             cy={px.cy}
@@ -713,23 +710,9 @@
             stroke-dasharray="6 4"
             pointer-events="none"
           />
-          <!-- Inner core (where weight = 1). Hidden when feather > 1
-               (collapses to center) or when feather = 0 (matches main). -->
-          {#if featherStart > 0.001 && featherStart < 0.999}
-            <ellipse
-              cx={px.cx}
-              cy={px.cy}
-              rx={px.rx * featherStart}
-              ry={px.ry * featherStart}
-              fill="none"
-              stroke="#7dd3fc"
-              stroke-width="1"
-              stroke-dasharray="3 3"
-              pointer-events="none"
-            />
-          {/if}
-          <!-- Feather knob: yellow diamond on the upward y-axis. Continuously
-               maps full feather range [0, 2]. -->
+          <!-- Feather knob: yellow diamond at the top of the outer halo
+               ellipse (or main top when feather = 0). Drag outward to soften,
+               inward to sharpen. -->
           <rect
             x={px.cx - 6}
             y={px.cy - featherKnobD - 6}

@@ -156,10 +156,11 @@ export const maskWeight = (mask: LocalMask, px: number, py: number, width: numbe
   const rxN = dxr / rx;
   const ryN = dyr / ry;
   const d = Math.sqrt(rxN * rxN + ryN * ryN);
-  // feather > 1 extends the falloff past the visible ellipse (halo).
-  const f = Math.max(0.001, mask.feather);
-  const fs = Math.max(0, 1 - f);
-  const fe = Math.max(1, f);
+  // Drawn ellipse = solid inner boundary (weight=1 anywhere inside). `feather`
+  // is the width of the outer halo where weight transitions from 1 to 0,
+  // measured in fractions of the semi-axis.
+  const fs = 1;
+  const fe = 1 + Math.max(0.001, mask.feather);
   const w = 1 - smoothstep(fs, fe, d);
   return mask.invert ? 1 - w : w;
 };

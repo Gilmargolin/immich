@@ -169,10 +169,11 @@ float maskWeight(int idx, vec2 px) {
   vec2 d = px - c;
   vec2 dr = vec2(d.x * cosA - d.y * sinA, d.x * sinA + d.y * cosA);
   float dist = length(vec2(dr.x / rx, dr.y / ry));
-  // feather > 1 extends the falloff outside the visible ellipse.
-  float f = max(0.001, feather);
-  float fs = max(0.0, 1.0 - f);
-  float fe = max(1.0, f);
+  // Drawn ellipse = solid inner boundary (weight=1 anywhere inside). The
+  // feather param is the width of the outer halo where weight transitions
+  // from 1 to 0, measured in fractions of the semi-axis.
+  float fs = 1.0;
+  float fe = 1.0 + max(0.001, feather);
   float w = 1.0 - smoothStepF(fs, fe, dist);
   return invert ? 1.0 - w : w;
 }
