@@ -197,21 +197,56 @@
     });
   };
 
-  // Feather knob lives on the inner dashed ellipse at the local 12 o'clock
-  // position. Dragging it inward (toward center) increases feather (softer
-  // edge); outward (toward outer ellipse) decreases feather (sharper edge).
-  // Position parity with rx/ry: uses raw |Δy| in screen space, same minor
-  // limitation as those when the mask is rotated.
+  // Feather knob is a slider on the upward y-axis above center, mapping
+  // continuously over the full feather range [0, 2]:
+  //   knob distance from center  D = ry * (1 - feather/2)
+  //     feather=0 → D = ry        (knob at top of main ellipse, sharp edge)
+  //     feather=1 → D = ry/2      (linear falloff from center to edge)
+  //     feather=2 → D = 0         (knob near center, halo extends to 2·r)
+  // Drag mapping (inverse): feather = 2 * (1 - clamp(d/ry, 0, 1)).
   const dragRadialFeather = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
     const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
     const cyPx = mask.cy * svgHeight;
     startDrag(e, ({ ny }) => {
-      const distFromCenter = Math.abs(ny * svgHeight - cyPx);
-      const featherInner = Math.max(0, Math.min(1, distFromCenter / ryPx));
-      // Schema bounds: feather ∈ [0, 1].
-      const feather = Math.max(0, Math.min(1, 1 - featherInner));
+      // Only "above center" matters; clamp negative drags to 0.
+      const distFromCenter = Math.max(0, cyPx - ny * svgHeight);
+      const t = Math.min(1, distFromCenter / ryPx);
+      const feather = Math.max(0, Math.min(2, 2 * (1 - t)));
       adjustManager.updateMask(idx, { ...mask, feather });
+    });
+  };
+
+  // Uniform-size knob: drag scales rx and ry by the same ratio, preserving
+  // aspect (so a circle stays a circle). Lives at the 4:30 position on the
+  // main ellipse so it's distinct from the rx (3 o'clock) and ry (6 o'clock)
+  // handles.
+  const dragRadialSize = (e: PointerEvent, idx: number, mask: RadialMask) => {
+    adjustManager.selectMask(idx);
+    const minDim = Math.min(svgWidth, svgHeight);
+    if (minDim < 1) {
+      return;
+    }
+    const cxPx = mask.cx * svgWidth;
+    const cyPx = mask.cy * svgHeight;
+    // Capture the initial size + grab vector so we can scale relative to
+    // them. The knob nominally sits on the ellipse at 45°; a drag changes
+    // rx and ry by the same ratio.
+    const initialRx = mask.rx;
+    const initialRy = mask.ry;
+    const startRxPx = initialRx * minDim;
+    const startRyPx = initialRy * minDim;
+    const startHandleX = startRxPx * Math.SQRT1_2;
+    const startHandleY = startRyPx * Math.SQRT1_2;
+    const startDistFromCenter = Math.hypot(startHandleX, startHandleY) || 1;
+    startDrag(e, ({ nx, ny }) => {
+      const dx = nx * svgWidth - cxPx;
+      const dy = ny * svgHeight - cyPx;
+      const newDist = Math.hypot(dx, dy);
+      const scale = newDist / startDistFromCenter;
+      const newRx = Math.max(0.02, initialRx * scale);
+      const newRy = Math.max(0.02, initialRy * scale);
+      adjustManager.updateMask(idx, { ...mask, rx: newRx, ry: newRy });
     });
   };
 
@@ -446,16 +481,19 @@
             <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
           </linearGradient>
         {:else}
+          {@const featherStart = Math.max(0, 1 - mask.feather)}
+          {@const featherEnd = Math.max(1, mask.feather)}
           <radialGradient
             id="mask-overlay-grad-{i}"
             cx={mask.cx * svgWidth}
             cy={mask.cy * svgHeight}
-            r={Math.max(mask.rx, mask.ry) * minDim}
+            r={Math.max(mask.rx, mask.ry) * minDim * featherEnd}
             fx={mask.cx * svgWidth}
             fy={mask.cy * svgHeight}
             gradientUnits="userSpaceOnUse"
           >
-            <stop offset={Math.max(0, 1 - Math.max(0.001, mask.feather))} stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset={featherStart / featherEnd} stop-color="#ef4444" stop-opacity="0.3" />
             <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
           </radialGradient>
         {/if}
@@ -470,11 +508,12 @@
         <rect x="0" y="0" width={svgWidth} height={svgHeight} fill="url(#mask-overlay-grad-{i})" pointer-events="none" />
       {:else}
         {@const px = radialPx(mask)}
+        {@const featherEnd = Math.max(1, mask.feather)}
         <ellipse
           cx={px.cx}
           cy={px.cy}
-          rx={px.rx}
-          ry={px.ry}
+          rx={px.rx * featherEnd}
+          ry={px.ry * featherEnd}
           fill="url(#mask-overlay-grad-{i})"
           transform="rotate({mask.angle} {px.cx} {px.cy})"
           pointer-events="none"
@@ -640,8 +679,29 @@
         </g>
       {:else}
         {@const px = radialPx(mask)}
-        {@const featherInner = Math.max(0.001, 1 - mask.feather)}
+        {@const featherStart = Math.max(0, 1 - mask.feather)}
+        {@const featherEnd = Math.max(1, mask.feather)}
+        {@const featherKnobD = px.ry * (1 - mask.feather / 2)}
+        {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
+        {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
         <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
+          <!-- Outer feather boundary (where weight = 0). Coincides with the
+               main ellipse for feather ≤ 1; visibly larger for feather > 1. -->
+          {#if featherEnd > 1.001}
+            <ellipse
+              cx={px.cx}
+              cy={px.cy}
+              rx={px.rx * featherEnd}
+              ry={px.ry * featherEnd}
+              fill="none"
+              stroke="#7dd3fc"
+              stroke-width="1"
+              stroke-dasharray="3 3"
+              stroke-opacity="0.7"
+              pointer-events="none"
+            />
+          {/if}
+          <!-- Main / drawn ellipse. Always shown. -->
           <ellipse
             cx={px.cx}
             cy={px.cy}
@@ -653,30 +713,47 @@
             stroke-dasharray="6 4"
             pointer-events="none"
           />
-          <ellipse
-            cx={px.cx}
-            cy={px.cy}
-            rx={px.rx * featherInner}
-            ry={px.ry * featherInner}
-            fill="none"
-            stroke="#7dd3fc"
-            stroke-width="1"
-            stroke-dasharray="3 3"
-            pointer-events="none"
-          />
-          <!-- Feather knob: yellow diamond at the top of the inner ellipse.
-               Drag inward to soften, outward to sharpen the edge. -->
+          <!-- Inner core (where weight = 1). Hidden when feather > 1
+               (collapses to center) or when feather = 0 (matches main). -->
+          {#if featherStart > 0.001 && featherStart < 0.999}
+            <ellipse
+              cx={px.cx}
+              cy={px.cy}
+              rx={px.rx * featherStart}
+              ry={px.ry * featherStart}
+              fill="none"
+              stroke="#7dd3fc"
+              stroke-width="1"
+              stroke-dasharray="3 3"
+              pointer-events="none"
+            />
+          {/if}
+          <!-- Feather knob: yellow diamond on the upward y-axis. Continuously
+               maps full feather range [0, 2]. -->
           <rect
             x={px.cx - 6}
-            y={px.cy - px.ry * featherInner - 6}
+            y={px.cy - featherKnobD - 6}
             width="12"
             height="12"
             fill="#facc15"
             stroke="#000"
             stroke-width="1"
-            transform="rotate(45 {px.cx} {px.cy - px.ry * featherInner})"
+            transform="rotate(45 {px.cx} {px.cy - featherKnobD})"
             style="cursor: grab;"
             onpointerdown={(e) => dragRadialFeather(e, i, mask)}
+          />
+          <!-- Size handle: scales rx and ry uniformly (preserves aspect /
+               keeps a circle a circle). 4:30 position to stay clear of the
+               rx (3 o'clock) and ry (6 o'clock) handles. -->
+          <circle
+            cx={sizeHandleX}
+            cy={sizeHandleY}
+            r="7"
+            fill="#facc15"
+            stroke="#000"
+            stroke-width="1"
+            style="cursor: nwse-resize;"
+            onpointerdown={(e) => dragRadialSize(e, i, mask)}
           />
           <circle
             cx={px.cx}

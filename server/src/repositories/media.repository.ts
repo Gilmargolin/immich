@@ -264,7 +264,12 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
   const rad = (-mask.angle * Math.PI) / 180;
   const cosA = Math.cos(rad);
   const sinA = Math.sin(rad);
-  const featherStart = Math.max(0, 1 - Math.max(0.001, mask.feather));
+  // featherStart < featherEnd; weight = 1 for d ≤ featherStart, 0 for d ≥ featherEnd.
+  // For feather ∈ [0, 1]: falloff happens inside the ellipse (start = 1-f, end = 1).
+  // For feather ∈ (1, 2]: falloff extends past the ellipse (start = 0, end = f).
+  const f = Math.max(0.001, mask.feather);
+  const featherStart = Math.max(0, 1 - f);
+  const featherEnd = Math.max(1, f);
   const invert = mask.invert;
 
   return {
@@ -277,7 +282,7 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
       const rxN = dxr / rx;
       const ryN = dyr / ry;
       const d = Math.sqrt(rxN * rxN + ryN * ryN);
-      let w = 1 - smoothstep(featherStart, 1, d);
+      let w = 1 - smoothstep(featherStart, featherEnd, d);
       if (invert) {
         w = 1 - w;
       }

@@ -169,8 +169,11 @@ float maskWeight(int idx, vec2 px) {
   vec2 d = px - c;
   vec2 dr = vec2(d.x * cosA - d.y * sinA, d.x * sinA + d.y * cosA);
   float dist = length(vec2(dr.x / rx, dr.y / ry));
-  float fs = max(0.0, 1.0 - max(0.001, feather));
-  float w = 1.0 - smoothStepF(fs, 1.0, dist);
+  // feather > 1 extends the falloff outside the visible ellipse.
+  float f = max(0.001, feather);
+  float fs = max(0.0, 1.0 - f);
+  float fe = max(1.0, f);
+  float w = 1.0 - smoothStepF(fs, fe, dist);
   return invert ? 1.0 - w : w;
 }
 

@@ -156,8 +156,11 @@ export const maskWeight = (mask: LocalMask, px: number, py: number, width: numbe
   const rxN = dxr / rx;
   const ryN = dyr / ry;
   const d = Math.sqrt(rxN * rxN + ryN * ryN);
-  const fs = Math.max(0, 1 - Math.max(0.001, mask.feather));
-  const w = 1 - smoothstep(fs, 1, d);
+  // feather > 1 extends the falloff past the visible ellipse (halo).
+  const f = Math.max(0.001, mask.feather);
+  const fs = Math.max(0, 1 - f);
+  const fe = Math.max(1, f);
+  const w = 1 - smoothstep(fs, fe, d);
   return mask.invert ? 1 - w : w;
 };
 

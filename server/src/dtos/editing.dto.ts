@@ -176,7 +176,15 @@ export class RadialMask {
   ry!: number;
   @IsNumber() @Min(-360) @Max(360) @ApiProperty({ description: 'Ellipse rotation in degrees' })
   angle!: number;
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Edge feather as fraction of semi-axis' })
+  @IsNumber()
+  @Min(0)
+  @Max(2)
+  @ApiProperty({
+    description:
+      'Edge feather. 0 = sharp at the ellipse boundary. ' +
+      '0 < f ≤ 1 = falloff inside the ellipse: weight=1 inside (1-f)·r, falls to 0 at r. ' +
+      '1 < f ≤ 2 = falloff extends past the ellipse: weight=1 at center, falls to 0 at f·r.',
+  })
   feather!: number;
   @IsBoolean()
   @ApiProperty({ description: 'False = weight 1 inside ellipse; true = weight 1 outside' })
