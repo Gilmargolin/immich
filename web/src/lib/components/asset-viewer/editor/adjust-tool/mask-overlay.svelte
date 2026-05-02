@@ -666,17 +666,15 @@
           />
           <!-- Feather knob: yellow diamond at the top of the inner ellipse.
                Drag inward to soften, outward to sharpen the edge. -->
-          {@const featherKnobX = px.cx}
-          {@const featherKnobY = px.cy - px.ry * featherInner}
           <rect
-            x={featherKnobX - 6}
-            y={featherKnobY - 6}
+            x={px.cx - 6}
+            y={px.cy - px.ry * featherInner - 6}
             width="12"
             height="12"
             fill="#facc15"
             stroke="#000"
             stroke-width="1"
-            transform="rotate(45 {featherKnobX} {featherKnobY})"
+            transform="rotate(45 {px.cx} {px.cy - px.ry * featherInner})"
             style="cursor: grab;"
             onpointerdown={(e) => dragRadialFeather(e, i, mask)}
           />
