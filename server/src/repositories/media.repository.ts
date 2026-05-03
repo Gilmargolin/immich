@@ -270,10 +270,15 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
   // expressed as a fraction of the semi-axis.
   //   feather = 0   → sharp edge at the ellipse boundary
   //   feather = 1   → halo extends one full radius past the ellipse
-  //   feather = 2   → halo extends two radii past the ellipse
   const featherStart = 1;
-  const featherEnd = 1 + Math.max(0.001, mask.feather);
+  const featherSpan = Math.max(0.001, mask.feather);
+  const featherEnd = 1 + featherSpan;
   const invert = mask.invert;
+  // `mid` biases where weight = 0.5 lands within the falloff band. Same
+  // piecewise-linear remap-then-smoothstep that the linear mask uses.
+  const mid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5));
+  const invMid = 0.5 / mid;
+  const invComp = 0.5 / (1 - mid);
 
   return {
     sliders,
@@ -285,7 +290,11 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
       const rxN = dxr / rx;
       const ryN = dyr / ry;
       const d = Math.sqrt(rxN * rxN + ryN * ryN);
-      let w = 1 - smoothstep(featherStart, featherEnd, d);
+      // Normalized position in the falloff band, clamped to [0, 1].
+      const tRaw = (d - featherStart) / featherSpan;
+      const t = tRaw < 0 ? 0 : tRaw > 1 ? 1 : tRaw;
+      const r = t <= mid ? t * invMid : 0.5 + (t - mid) * invComp;
+      let w = 1 - r * r * (3 - 2 * r);
       if (invert) {
         w = 1 - w;
       }

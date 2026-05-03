@@ -26,8 +26,8 @@ void main() {
 //   u_maskGeomA[i]       : linear → (ax, ay, bx, by) all normalized [0,1]
 //                          radial → (cx, cy, rx, ry); cx/cy normalized to W/H,
 //                                    rx/ry normalized to min(W, H)
-//   u_maskGeomB[i]       : linear → unused
-//                          radial → (angleDeg, feather, invert?1:0, _)
+//   u_maskGeomB[i]       : linear → (mid, _, _, _)
+//                          radial → (angleDeg, feather, invert?1:0, mid)
 //   u_maskSliders0[i]    : (brightness, contrast, saturation, warmth)
 //   u_maskSliders1[i]    : (tint, highlights, shadows, whitePoint)
 //   u_maskBlackPoint[i]  : blackPoint
@@ -163,6 +163,7 @@ float maskWeight(int idx, vec2 px) {
   float angleDeg = u_maskGeomB[idx].x;
   float feather = u_maskGeomB[idx].y;
   bool invert = u_maskGeomB[idx].z > 0.5;
+  float rmid = clamp(u_maskGeomB[idx].w, 0.05, 0.95);
   float rad = -angleDeg * 3.14159265358979323846 / 180.0;
   float cosA = cos(rad);
   float sinA = sin(rad);
@@ -171,10 +172,13 @@ float maskWeight(int idx, vec2 px) {
   float dist = length(vec2(dr.x / rx, dr.y / ry));
   // Drawn ellipse = solid inner boundary (weight=1 anywhere inside). The
   // feather param is the width of the outer halo where weight transitions
-  // from 1 to 0, measured in fractions of the semi-axis.
-  float fs = 1.0;
-  float fe = 1.0 + max(0.001, feather);
-  float w = 1.0 - smoothStepF(fs, fe, dist);
+  // from 1 to 0, measured in fractions of the semi-axis. The mid param
+  // biases where weight=0.5 lands inside that band (piecewise-linear remap
+  // before the cubic smoothstep, matching the linear mask).
+  float featherSpan = max(0.001, feather);
+  float t = clamp((dist - 1.0) / featherSpan, 0.0, 1.0);
+  float r = (t <= rmid) ? (t * 0.5 / rmid) : (0.5 + (t - rmid) * 0.5 / (1.0 - rmid));
+  float w = 1.0 - r * r * (3.0 - 2.0 * r);
   return invert ? 1.0 - w : w;
 }
 

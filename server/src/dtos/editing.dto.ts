@@ -192,6 +192,18 @@ export class RadialMask {
   @ApiProperty({ description: 'False = weight 1 inside ellipse; true = weight 1 outside' })
   invert!: boolean;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0.05)
+  @Max(0.95)
+  @ApiProperty({
+    required: false,
+    description:
+      'Position within the outer falloff band where weight = 0.5 (0..1, default 0.5). ' +
+      'Bias toward 0 to keep the falloff sharp near the inner edge; toward 1 to keep it sharp near the outer edge.',
+  })
+  mid?: number;
+
   @ValidateNested()
   @Type(() => AdjustmentSliders)
   @ApiProperty({ description: 'Adjustments to apply where this mask has weight > 0' })

@@ -33,6 +33,10 @@ export type RadialMask = {
   angle: number;
   feather: number;
   invert: boolean;
+  // Falloff midpoint within the outer halo band (0.05..0.95). 0.5 = uniform
+  // smoothstep; lower bias keeps the falloff sharp near the inner edge,
+  // higher bias keeps it sharp near the outer edge.
+  mid?: number;
   params: AdjustmentSliders;
 };
 
@@ -309,6 +313,8 @@ export class AdjustGLRenderer {
         this.geomBBuf[i * 4 + 0] = m.angle;
         this.geomBBuf[i * 4 + 1] = m.feather;
         this.geomBBuf[i * 4 + 2] = m.invert ? 1 : 0;
+        // geomB.w = mid (falloff bias), default 0.5.
+        this.geomBBuf[i * 4 + 3] = m.mid ?? 0.5;
       }
     }
 

@@ -158,10 +158,14 @@ export const maskWeight = (mask: LocalMask, px: number, py: number, width: numbe
   const d = Math.sqrt(rxN * rxN + ryN * ryN);
   // Drawn ellipse = solid inner boundary (weight=1 anywhere inside). `feather`
   // is the width of the outer halo where weight transitions from 1 to 0,
-  // measured in fractions of the semi-axis.
-  const fs = 1;
-  const fe = 1 + Math.max(0.001, mask.feather);
-  const w = 1 - smoothstep(fs, fe, d);
+  // measured in fractions of the semi-axis. `mid` biases where weight=0.5
+  // lands within the falloff band — same piecewise-linear remap as linear.
+  const featherSpan = Math.max(0.001, mask.feather);
+  const tRaw = (d - 1) / featherSpan;
+  const t = tRaw < 0 ? 0 : tRaw > 1 ? 1 : tRaw;
+  const mid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5));
+  const r = t <= mid ? (t * 0.5) / mid : 0.5 + ((t - mid) * 0.5) / (1 - mid);
+  const w = 1 - r * r * (3 - 2 * r);
   return mask.invert ? 1 - w : w;
 };
 

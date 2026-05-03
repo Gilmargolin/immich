@@ -227,6 +227,34 @@
     });
   };
 
+  // Mid knob: biases where weight = 0.5 lands within the falloff band.
+  // Lives on the y-axis between main top and the feather knob, with a small
+  // horizontal offset so it doesn't overlap the feather knob's drag axis.
+  // y position interpolates linearly from main top (mid → 0) to feather knob
+  // (mid → 1). Drag inverse: project cursor's y back onto that line.
+  const MID_MIN = 0.05;
+  const MID_MAX = 0.95;
+  const dragRadialMid = (e: PointerEvent, idx: number, mask: RadialMask) => {
+    adjustManager.selectMask(idx);
+    const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
+    const cyPx = mask.cy * svgHeight;
+    // y of main top in SVG coords:
+    const mainTopY = cyPx - ryPx;
+    // y of the (log-mapped) feather knob:
+    const featherKnobY =
+      cyPx - ryPx * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET);
+    const span = mainTopY - featherKnobY; // > 0 for any feather > 0
+    if (span < 1) {
+      return; // no visible band — feather is 0; mid has no effect
+    }
+    startDrag(e, ({ ny }) => {
+      const cursorY = ny * svgHeight;
+      const t = (mainTopY - cursorY) / span;
+      const mid = Math.max(MID_MIN, Math.min(MID_MAX, t));
+      adjustManager.updateMask(idx, { ...mask, mid });
+    });
+  };
+
   // Uniform-size knob: drag scales rx and ry by the same ratio, preserving
   // aspect (so a circle stays a circle). Lives at the 4:30 position on the
   // main ellipse so it's distinct from the rx (3 o'clock) and ry (6 o'clock)
@@ -492,6 +520,9 @@
           </linearGradient>
         {:else}
           {@const featherEnd = 1 + mask.feather}
+          {@const radMid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
+          {@const innerOffset = 1 / featherEnd}
+          {@const midOffset = innerOffset + radMid * (1 - innerOffset)}
           <radialGradient
             id="mask-overlay-grad-{i}"
             cx={mask.cx * svgWidth}
@@ -502,7 +533,8 @@
             gradientUnits="userSpaceOnUse"
           >
             <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
-            <stop offset={1 / featherEnd} stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset={innerOffset} stop-color="#ef4444" stop-opacity="0.3" />
+            <stop offset={midOffset} stop-color="#ef4444" stop-opacity="0.15" />
             <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
           </radialGradient>
         {/if}
@@ -737,6 +769,36 @@
             style="cursor: grab;"
             onpointerdown={(e) => dragRadialFeather(e, i, mask)}
           />
+          <!-- Mid knob: biases the falloff curve. Only meaningful (and only
+               drawn) when feather > 0. Sits on the y-axis between main top
+               and the feather knob, with a small horizontal offset and
+               connector tick so it reads as belonging to the falloff band. -->
+          {#if mask.feather > 0.001}
+            {@const midParam = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
+            {@const midKnobY = px.cy - px.ry - midParam * (featherKnobD - px.ry)}
+            {@const midKnobX = px.cx + 18}
+            <line
+              x1={px.cx}
+              y1={midKnobY}
+              x2={midKnobX}
+              y2={midKnobY}
+              stroke="#facc15"
+              stroke-width="1.5"
+              pointer-events="none"
+            />
+            <rect
+              x={midKnobX - 5}
+              y={midKnobY - 5}
+              width="10"
+              height="10"
+              fill="#facc15"
+              stroke="#000"
+              stroke-width="1"
+              transform="rotate(45 {midKnobX} {midKnobY})"
+              style="cursor: grab;"
+              onpointerdown={(e) => dragRadialMid(e, i, mask)}
+            />
+          {/if}
           <!-- Size handle: scales rx and ry uniformly (preserves aspect /
                keeps a circle a circle). 4:30 position to stay clear of the
                rx (3 o'clock) and ry (6 o'clock) handles. -->
