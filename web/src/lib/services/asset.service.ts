@@ -105,6 +105,8 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
     type: $t('assets'),
     $if: () => !!(currentAuthUser && !asset.isTrashed && asset.visibility !== AssetVisibility.Locked),
     onAction: () => modalManager.show(SharedLinkCreateModal, { assetIds: [asset.id] }),
+    // 's' is taken by slideshow; use 'h' (sHare).
+    shortcuts: [{ key: 'h' }],
   };
 
   const Download: ActionItem = {
@@ -137,6 +139,10 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
     onAction: () => {
       assetViewerManager.isPlayingMotionPhoto = true;
     },
+    // Space toggles motion-photo playback (play/pause are mutually exclusive
+    // via $if so binding the same key on both is safe — only one is "active"
+    // at a time and only its onAction fires).
+    shortcuts: [{ key: ' ' }],
   };
 
   const StopMotionPhoto: ActionItem = {
@@ -147,6 +153,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
     onAction: () => {
       assetViewerManager.isPlayingMotionPhoto = false;
     },
+    shortcuts: [{ key: ' ' }],
   };
 
   const Favorite: ActionItem = {
@@ -182,6 +189,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
     color: 'danger',
     $if: () => !!asset.isOffline,
     onAction: () => assetViewerManager.toggleDetailPanel(),
+    shortcuts: [{ key: 'o' }],
   };
 
   const ZoomIn: ActionItem = {
@@ -189,6 +197,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
     icon: mdiMagnifyPlusOutline,
     $if: () => assetViewerManager.canZoomIn(),
     onAction: () => assetViewerManager.emit('Zoom'),
+    shortcuts: [{ key: '+' }, { key: '=' }],
   };
 
   const ZoomOut: ActionItem = {
@@ -196,6 +205,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
     icon: mdiMagnifyMinusOutline,
     $if: () => assetViewerManager.canZoomOut(),
     onAction: () => assetViewerManager.emit('Zoom'),
+    shortcuts: [{ key: '-' }],
   };
 
   const Copy: ActionItem = {

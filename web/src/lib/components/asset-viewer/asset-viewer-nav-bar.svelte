@@ -125,33 +125,47 @@
         {/snippet}
       </Tooltip>
     {/if}
-    <ActionButton action={Cast} />
-    <ActionButton action={Actions.Share} />
-    <ActionButton action={Actions.Offline} />
-    <ActionButton action={Actions.ZoomIn} />
-    <ActionButton action={Actions.ZoomOut} />
-    <ActionButton action={Actions.PlayMotionPhoto} />
-    <ActionButton action={Actions.StopMotionPhoto} />
-    <ActionButton action={Actions.Copy} />
-    <ActionButton action={Actions.SharedLinkDownload} />
-    <ActionButton action={Actions.Info} />
+
+    <!-- The visible top-right cluster has been trimmed down to four
+         everyday-use buttons + the overflow menu. Everything else is
+         reachable from the menu and via single-letter shortcuts (registered
+         on the action items themselves and bound by the CommandPalette
+         provider just below). DeleteAction is mounted but invisible — it
+         only registers the Delete-key shortcut. -->
+    <ActionButton action={Actions.Edit} />
     <ActionButton action={Actions.Favorite} />
     <ActionButton action={Actions.Unfavorite} />
+    <ActionButton action={Actions.Info} />
 
-    {#if isOwner}
-      <RatingAction {asset} {onAction} />
+    {#if sharedLink}
+      <!-- Shared-link viewers don't get the overflow menu, so keep their
+           one-click download visible inline. -->
+      <ActionButton action={Actions.SharedLinkDownload} />
     {/if}
 
-    <ActionButton action={Actions.Edit} />
-
     {#if isOwner}
-      <DeleteAction {asset} {onAction} {preAction} {onUndoDelete} />
+      <div class="hidden">
+        <DeleteAction {asset} {onAction} {preAction} {onUndoDelete} />
+      </div>
     {/if}
 
     {#if !sharedLink}
       <ButtonContextMenu direction="left" align="top-right" color="secondary" title={$t('more')} icon={mdiDotsVertical}>
         {#if showSlideshow && !isLocked}
           <MenuOption icon={mdiPresentationPlay} text={$t('slideshow')} onClick={onPlaySlideshow} />
+        {/if}
+
+        <!-- Actions previously visible in the top row, now in the menu. -->
+        <ActionMenuItem action={Cast} />
+        <ActionMenuItem action={Actions.Share} />
+        <ActionMenuItem action={Actions.Offline} />
+        <ActionMenuItem action={Actions.ZoomIn} />
+        <ActionMenuItem action={Actions.ZoomOut} />
+        <ActionMenuItem action={Actions.PlayMotionPhoto} />
+        <ActionMenuItem action={Actions.StopMotionPhoto} />
+        <ActionMenuItem action={Actions.Copy} />
+        {#if isOwner}
+          <RatingAction {asset} {onAction} />
         {/if}
 
         <ActionMenuItem action={Actions.Download} />
