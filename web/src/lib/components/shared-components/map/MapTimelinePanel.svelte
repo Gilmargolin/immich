@@ -168,9 +168,9 @@
           />
           <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
           <hr />
-          <ActionMenuItem action={Actions.RegenerateThumbnailJob} />
-          <ActionMenuItem action={Actions.RefreshMetadataJob} />
-          <ActionMenuItem action={Actions.TranscodeVideoJob} />
+          <ActionMenuItem action={Actions.RegenerateThumbnailJob} showIcon />
+          <ActionMenuItem action={Actions.RefreshMetadataJob} showIcon />
+          <ActionMenuItem action={Actions.TranscodeVideoJob} showIcon />
         </ButtonContextMenu>
       {:else}
         <DownloadAction />

@@ -40,15 +40,7 @@
     type StackResponseDto,
   } from '@immich/sdk';
   import { ActionButton, CommandPaletteDefaultProvider, Tooltip, type ActionItem } from '@immich/ui';
-  import {
-    mdiArrowLeft,
-    mdiArrowRight,
-    mdiCompare,
-    mdiDotsVertical,
-    mdiImageSearch,
-    mdiPresentationPlay,
-    mdiVideoOutline,
-  } from '@mdi/js';
+  import { mdiArrowLeft, mdiArrowRight, mdiDotsVertical } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
   interface Props {
@@ -151,35 +143,35 @@
 
     {#if !sharedLink}
       <ButtonContextMenu direction="left" align="top-right" color="secondary" title={$t('more')} icon={mdiDotsVertical}>
+        <!-- View -->
+        <li class="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">View</li>
         {#if showSlideshow && !isLocked}
-          <MenuOption icon={mdiPresentationPlay} text={$t('slideshow')} onClick={onPlaySlideshow} />
+          <MenuOption text={$t('slideshow')} shortcutLabel="S" onClick={onPlaySlideshow} />
         {/if}
-
-        <!-- Actions previously visible in the top row, now in the menu. -->
         <ActionMenuItem action={Cast} />
-        <ActionMenuItem action={Actions.Share} />
-        <ActionMenuItem action={Actions.Offline} />
         <ActionMenuItem action={Actions.ZoomIn} />
         <ActionMenuItem action={Actions.ZoomOut} />
         <ActionMenuItem action={Actions.PlayMotionPhoto} />
         <ActionMenuItem action={Actions.StopMotionPhoto} />
-        <ActionMenuItem action={Actions.Copy} />
-        {#if isOwner}
-          <RatingAction {asset} {onAction} />
+        {#if asset.type === AssetTypeEnum.Video}
+          <MenuOption
+            onClick={() => setPlayOriginalVideo(!playOriginalVideo)}
+            text={playOriginalVideo ? $t('play_transcoded_video') : $t('play_original_video')}
+          />
         {/if}
 
+        <!-- Share -->
+        <li class="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">Share</li>
+        <ActionMenuItem action={Actions.Share} />
         <ActionMenuItem action={Actions.Download} />
         <ActionMenuItem action={Actions.DownloadOriginal} />
 
-        {#if !isLocked && asset.isTrashed}
-          <RestoreAction {asset} {onAction} />
-        {/if}
-
+        <!-- Organize -->
+        <li class="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">Organize</li>
         <ActionMenuItem action={Actions.AddToAlbum} />
         {#if album && (isOwner || isAlbumOwner)}
           <RemoveFromAlbumAction {album} onRemove={onRemoveFromAlbum} assetIds={[asset.id]} menuItem />
         {/if}
-
         {#if isOwner}
           <AddToStackAction {asset} {stack} {onAction} />
           {#if stack}
@@ -202,44 +194,43 @@
         {#if asset.type === AssetTypeEnum.Image && !isLocked}
           <SetProfilePictureAction {asset} />
         {/if}
+        {#if !isLocked && isOwner && !asset.isArchived && !asset.isTrashed}
+          <MenuOption
+            onClick={() => goto(Route.photos({ at: stack?.primaryAssetId ?? asset.id }))}
+            text={$t('view_in_timeline')}
+          />
+        {/if}
+        {#if !isLocked && !asset.isArchived && !asset.isTrashed && smartSearchEnabled}
+          <MenuOption
+            onClick={() => goto(Route.search({ queryAssetId: stack?.primaryAssetId ?? asset.id }))}
+            text={$t('view_similar_photos')}
+          />
+        {/if}
+        {#if !isLocked && isOwner}
+          <ArchiveAction {asset} {onAction} {preAction} />
+        {/if}
+        {#if !asset.isTrashed && isOwner}
+          <SetVisibilityAction asset={toTimelineAsset(asset)} {onAction} {preAction} />
+        {/if}
+        {#if !isLocked && asset.isTrashed}
+          <RestoreAction {asset} {onAction} />
+        {/if}
+        <ActionMenuItem action={Actions.Offline} />
+
+        <!-- Edit -->
+        <li class="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">Edit</li>
+        <ActionMenuItem action={Actions.Copy} />
         {#if isOwner && asset.type === AssetTypeEnum.Image && !asset.isTrashed && !isLocked}
           <PasteAdjustmentsToAssetAction {asset} />
           <RemoveMotionAction {asset} />
         {/if}
-
-        {#if !isLocked}
-          {#if isOwner}
-            <ArchiveAction {asset} {onAction} {preAction} />
-            {#if !asset.isArchived && !asset.isTrashed}
-              <MenuOption
-                icon={mdiImageSearch}
-                onClick={() => goto(Route.photos({ at: stack?.primaryAssetId ?? asset.id }))}
-                text={$t('view_in_timeline')}
-              />
-            {/if}
-          {/if}
-          {#if !asset.isArchived && !asset.isTrashed && smartSearchEnabled}
-            <MenuOption
-              icon={mdiCompare}
-              onClick={() => goto(Route.search({ queryAssetId: stack?.primaryAssetId ?? asset.id }))}
-              text={$t('view_similar_photos')}
-            />
-          {/if}
-        {/if}
-
-        {#if !asset.isTrashed && isOwner}
-          <SetVisibilityAction asset={toTimelineAsset(asset)} {onAction} {preAction} />
-        {/if}
-
-        {#if asset.type === AssetTypeEnum.Video}
-          <MenuOption
-            icon={mdiVideoOutline}
-            onClick={() => setPlayOriginalVideo(!playOriginalVideo)}
-            text={playOriginalVideo ? $t('play_transcoded_video') : $t('play_original_video')}
-          />
-        {/if}
         {#if isOwner}
-          <hr />
+          <RatingAction {asset} {onAction} />
+        {/if}
+
+        {#if isOwner}
+          <!-- Admin -->
+          <li class="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">Admin</li>
           <ActionMenuItem action={Actions.RefreshFacesJob} />
           <ActionMenuItem action={Actions.RefreshMetadataJob} />
           <ActionMenuItem action={Actions.RegenerateThumbnailJob} />

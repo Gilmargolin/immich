@@ -75,7 +75,7 @@
         title={$t('show_person_options')}
       >
         <MenuOption onClick={onHidePerson} icon={mdiEyeOffOutline} text={$t('hide_person')} />
-        <ActionMenuItem action={SetDateOfBirth} />
+        <ActionMenuItem action={SetDateOfBirth} showIcon />
         <MenuOption onClick={onMergePeople} icon={mdiAccountMultipleCheckOutline} text={$t('merge_people')} />
         <MenuOption
           onClick={onToggleFavorite}
