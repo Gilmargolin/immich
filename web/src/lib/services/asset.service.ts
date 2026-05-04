@@ -132,7 +132,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
   };
 
   const PlayMotionPhoto: ActionItem = {
-    title: $t('play_motion_photo'),
+    title: 'Play motion',
     icon: mdiMotionPlayOutline,
     type: $t('assets'),
     $if: () => !!asset.livePhotoVideoId && !assetViewerManager.isPlayingMotionPhoto,
@@ -146,7 +146,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
   };
 
   const StopMotionPhoto: ActionItem = {
-    title: $t('stop_motion_photo'),
+    title: 'Stop motion',
     icon: mdiMotionPauseOutline,
     type: $t('assets'),
     $if: () => !!asset.livePhotoVideoId && assetViewerManager.isPlayingMotionPhoto,
@@ -263,25 +263,25 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) =
   };
 
   const RefreshFacesJob: ActionItem = {
-    title: $t('refresh_faces'),
+    title: 'Re-detect faces',
     icon: mdiHeadSyncOutline,
     onAction: () => handleRunAssetJob({ name: AssetJobName.RefreshFaces, assetIds: [asset.id] }),
   };
 
   const RefreshMetadataJob: ActionItem = {
-    title: $t('refresh_metadata'),
+    title: 'Re-read metadata',
     icon: mdiDatabaseRefreshOutline,
     onAction: () => handleRunAssetJob({ name: AssetJobName.RefreshMetadata, assetIds: [asset.id] }),
   };
 
   const RegenerateThumbnailJob: ActionItem = {
-    title: $t('refresh_thumbnails'),
+    title: 'Re-gen thumbnail',
     icon: mdiImageRefreshOutline,
     onAction: () => handleRunAssetJob({ name: AssetJobName.RegenerateThumbnail, assetIds: [asset.id] }),
   };
 
   const TranscodeVideoJob: ActionItem = {
-    title: $t('refresh_encoded_videos'),
+    title: 'Re-encode video',
     icon: mdiCogRefreshOutline,
     onAction: () => handleRunAssetJob({ name: AssetJobName.TranscodeVideo, assetIds: [asset.id] }),
     $if: () => asset.type === AssetTypeEnum.Video,

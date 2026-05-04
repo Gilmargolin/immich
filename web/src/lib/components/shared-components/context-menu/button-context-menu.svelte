@@ -11,7 +11,7 @@
   } from '$lib/utils/context-menu';
   import { generateId } from '$lib/utils/generate-id';
   import { IconButton, type Color, type Size, type Variants } from '@immich/ui';
-  import type { Snippet } from 'svelte';
+  import { setContext, type Snippet } from 'svelte';
   import type { HTMLAttributes } from 'svelte/elements';
 
   type Props = {
@@ -34,6 +34,12 @@
      */
     buttonClass?: string | undefined;
     hideContent?: boolean;
+    /**
+     * Render every MenuOption inside this menu in compact mode (smaller font,
+     * tighter padding, no icon). Inherited via Svelte context, so it also
+     * applies to MenuOptions rendered by custom action wrappers.
+     */
+    compact?: boolean;
     children?: Snippet;
     offset?: {
       x: number;
@@ -51,10 +57,16 @@
     variant = 'ghost',
     buttonClass = undefined,
     hideContent = false,
+    compact = false,
     children,
     offset,
     ...restProps
   }: Props = $props();
+
+  // Surface the compact flag to all MenuOption descendants. Reactive
+  // re-publishing isn't needed — `compact` is set once at the menu's
+  // call site and doesn't change.
+  setContext('menuOptionCompact', compact);
 
   let isOpen = $state(false);
   let contextMenuPosition = $state({ x: 0, y: 0 });

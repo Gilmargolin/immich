@@ -142,7 +142,7 @@
     {/if}
 
     {#if !sharedLink}
-      <ButtonContextMenu direction="left" align="top-right" color="secondary" title={$t('more')} icon={mdiDotsVertical}>
+      <ButtonContextMenu direction="left" align="top-right" color="secondary" title={$t('more')} icon={mdiDotsVertical} compact>
         <!-- View -->
         <li class="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">View</li>
         {#if showSlideshow && !isLocked}
@@ -156,7 +156,7 @@
         {#if asset.type === AssetTypeEnum.Video}
           <MenuOption
             onClick={() => setPlayOriginalVideo(!playOriginalVideo)}
-            text={playOriginalVideo ? $t('play_transcoded_video') : $t('play_original_video')}
+            text={playOriginalVideo ? 'Transcoded video' : 'Original video'}
           />
         {/if}
 
@@ -197,13 +197,13 @@
         {#if !isLocked && isOwner && !asset.isArchived && !asset.isTrashed}
           <MenuOption
             onClick={() => goto(Route.photos({ at: stack?.primaryAssetId ?? asset.id }))}
-            text={$t('view_in_timeline')}
+            text="In timeline"
           />
         {/if}
         {#if !isLocked && !asset.isArchived && !asset.isTrashed && smartSearchEnabled}
           <MenuOption
             onClick={() => goto(Route.search({ queryAssetId: stack?.primaryAssetId ?? asset.id }))}
-            text={$t('view_similar_photos')}
+            text="Similar photos"
           />
         {/if}
         {#if !isLocked && isOwner}

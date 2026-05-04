@@ -4,6 +4,7 @@
   import { optionClickCallbackStore, selectedIdStore } from '$lib/stores/context-menu.store';
   import { generateId } from '$lib/utils/generate-id';
   import { Icon, type IconLike } from '@immich/ui';
+  import { getContext } from 'svelte';
 
   interface Props {
     text: string;
@@ -26,6 +27,14 @@
     shortcut = null,
     shortcutLabel = '',
   }: Props = $props();
+
+  // Compact mode: opt-in via Svelte context (set by ButtonContextMenu's
+  // `compact` prop). Hides icons, shrinks the font, tightens padding so the
+  // whole menu reads as a dense, keyboard-driven list. Inherited by every
+  // MenuOption inside the menu (including ones rendered by custom action
+  // wrappers like ArchiveAction, RestoreAction, etc. — no per-component
+  // changes needed).
+  const compact = getContext<boolean>('menuOptionCompact') === true;
 
   let id: string = generateId();
 
@@ -53,12 +62,12 @@
   onclick={handleClick}
   onmouseover={() => ($selectedIdStore = id)}
   onmouseleave={() => ($selectedIdStore = undefined)}
-  class="w-full p-4 text-start text-sm font-medium {textColor} focus:outline-none focus:ring-2 focus:ring-inset cursor-pointer border-gray-200 flex gap-2 items-center {isActive
-    ? activeColor
-    : 'bg-slate-100'}"
+  class="w-full text-start font-medium {textColor} focus:outline-none focus:ring-2 focus:ring-inset cursor-pointer border-gray-200 flex gap-2 items-center {compact
+    ? 'px-3 py-1.5 text-xs'
+    : 'p-4 text-sm'} {isActive ? activeColor : 'bg-slate-100'}"
   role="menuitem"
 >
-  {#if icon}
+  {#if icon && !compact}
     <Icon {icon} aria-hidden size="18" />
   {/if}
   <div class="w-full">
