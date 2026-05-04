@@ -217,7 +217,26 @@ const applyPrecomputedSliders = (
 type PrecomputedMask = {
   sliders: PrecomputedSliders;
   weight: (x: number, y: number) => number;
+  // Optional luminance gate. When active, the spatial weight is multiplied by
+  // lumKey(linear-luminance, lumLow, lumHigh). hasLumGate=false means the gate
+  // is the identity (1) — so existing masks (no lumLow/lumHigh) are byte-
+  // identical to the pre-feature behavior.
+  hasLumGate: boolean;
+  lumLow: number;
+  lumHigh: number;
 };
+
+// Smooth in-band/out-of-band gate on Rec.709 linear luminance. Returns 1
+// inside [lo, hi], smoothly drops to 0 over a fixed feather band of LUM_BAND
+// on each side. Mirrored byte-for-byte in adjust-math.ts and adjust-shader.ts.
+const LUM_BAND = 0.05;
+const lumKey = (y: number, lo: number, hi: number): number => {
+  const inLow = smoothstep(lo - LUM_BAND, lo, y);
+  const inHigh = 1 - smoothstep(hi, hi + LUM_BAND, y);
+  return inLow * inHigh;
+};
+
+const isLumGateActive = (lumLow: number, lumHigh: number): boolean => lumLow > 0 || lumHigh < 1;
 
 // Build a per-pixel weight function from a LocalMask. Coordinates in the mask
 // DTO are normalized: cx/ax/etc to [0,1] of image width; cy/ay/etc to [0,1] of
@@ -225,6 +244,9 @@ type PrecomputedMask = {
 // circle regardless of image aspect.
 const precomputeMask = (mask: LocalMask, width: number, height: number): PrecomputedMask => {
   const sliders = precomputeSliders(mask.params);
+  const lumLow = mask.lumLow ?? 0;
+  const lumHigh = mask.lumHigh ?? 1;
+  const hasLumGate = isLumGateActive(lumLow, lumHigh);
 
   if (mask.kind === LocalMaskKind.Linear) {
     const ax = mask.ax * width;
@@ -235,7 +257,7 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
     const vy = by - ay;
     const lenSq = vx * vx + vy * vy;
     if (lenSq < 1e-6) {
-      return { sliders, weight: () => 0 };
+      return { sliders, weight: () => 0, hasLumGate, lumLow, lumHigh };
     }
     const nx = vx / lenSq;
     const ny = vy / lenSq;
@@ -247,6 +269,9 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
     const invComp = 0.5 / (1 - mid);
     return {
       sliders,
+      hasLumGate,
+      lumLow,
+      lumHigh,
       weight: (x, y) => {
         const t = (x - ax) * nx + (y - ay) * ny;
         const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -282,6 +307,9 @@ const precomputeMask = (mask: LocalMask, width: number, height: number): Precomp
 
   return {
     sliders,
+    hasLumGate,
+    lumLow,
+    lumHigh,
     weight: (x, y) => {
       const dx = x - cx;
       const dy = y - cy;
@@ -349,7 +377,14 @@ const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters)
 
     for (let mi = 0; mi < maskCount; mi++) {
       const mask = masks[mi];
-      const w = mask.weight(x, y);
+      let w = mask.weight(x, y);
+      if (w > 0 && mask.hasLumGate) {
+        // Sample luminance from the current linear-light RGB (after global +
+        // any earlier masks) so the gate responds to "what's there now".
+        const yLin = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        const yClamped = yLin < 0 ? 0 : yLin > 1 ? 1 : yLin;
+        w *= lumKey(yClamped, mask.lumLow, mask.lumHigh);
+      }
       if (w > 0) {
         const adj = applyPrecomputedSliders(r, g, b, mask.sliders);
         r = r + (adj.r - r) * w;

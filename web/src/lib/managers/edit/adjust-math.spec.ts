@@ -250,4 +250,49 @@ describe('applyAdjustToPixel — local masks', () => {
     const out = applyAt([128, 128, 128], {}, [mask]);
     expect(Math.abs(out.r - 128)).toBeLessThan(5);
   });
+
+  // Luminance gate parity: pin the same numerical invariants the server
+  // pins. lumLow/lumHigh scale a mask's effect by a smooth function of
+  // luminance — within the spatial weight, dark pixels (below lumLow) and
+  // bright pixels (above lumHigh) see less / no effect.
+  it('lumLow=0.5/lumHigh=1: a dark pixel inside the mask region sees no effect', () => {
+    // sRGB 30 ≈ 0.0116 linear — well below lumLow=0.5 minus the feather band,
+    // so the gate is 0 and the brightness mask has no effect.
+    const mask: LocalMask = {
+      kind: 'radial',
+      cx: 0.5,
+      cy: 0.5,
+      rx: 0.5,
+      ry: 0.5,
+      angle: 0,
+      feather: 0.05,
+      invert: false,
+      lumLow: 0.5,
+      lumHigh: 1,
+      params: { ...ZERO, brightness: 1 },
+    };
+    const dark = applyAt([30, 30, 30], {}, [mask], 100, 100, 50, 50);
+    // Without the gate, brightness=+1 would push 30 way up. With it, ~unchanged.
+    expect(Math.abs(dark.r - 30)).toBeLessThan(5);
+  });
+
+  it('lumLow=0.5/lumHigh=1: a bright pixel inside the mask region sees full effect', () => {
+    // sRGB 230 ≈ 0.79 linear — well above lumLow=0.5 + band, gate ≈ 1, so
+    // brightness=+1 (×4 in linear) clips the byte all the way to 255.
+    const mask: LocalMask = {
+      kind: 'radial',
+      cx: 0.5,
+      cy: 0.5,
+      rx: 0.5,
+      ry: 0.5,
+      angle: 0,
+      feather: 0.05,
+      invert: false,
+      lumLow: 0.5,
+      lumHigh: 1,
+      params: { ...ZERO, brightness: 1 },
+    };
+    const bright = applyAt([230, 230, 230], {}, [mask], 100, 100, 50, 50);
+    expect(bright.r).toBeGreaterThan(250);
+  });
 });

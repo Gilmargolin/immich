@@ -12,7 +12,17 @@ export interface AdjustmentSliders {
   blackPoint: number;
 }
 
-export type LinearMask = {
+// Optional luminance gate — within the mask's spatial weight, scale the
+// adjustment by a smooth function of pixel luminance. Defaults (0, 1) =
+// identity (no behavior change vs. masks saved before the feature shipped).
+// Use case: a small radial around a bird's head where you want to brighten
+// only the dark feathers and leave the white cheek untouched.
+export interface LumGate {
+  lumLow?: number; // [0, 1], default 0
+  lumHigh?: number; // [0, 1], default 1, must be ≥ lumLow
+}
+
+export type LinearMask = LumGate & {
   kind: 'linear';
   ax: number;
   ay: number;
@@ -24,7 +34,7 @@ export type LinearMask = {
   params: AdjustmentSliders;
 };
 
-export type RadialMask = {
+export type RadialMask = LumGate & {
   kind: 'radial';
   cx: number;
   cy: number;
@@ -84,6 +94,7 @@ type Uniforms = {
   u_maskKind: WebGLUniformLocation;
   u_maskGeomA: WebGLUniformLocation;
   u_maskGeomB: WebGLUniformLocation;
+  u_maskGeomC: WebGLUniformLocation;
   u_maskSliders0: WebGLUniformLocation;
   u_maskSliders1: WebGLUniformLocation;
   u_maskBlackPoint: WebGLUniformLocation;
@@ -118,6 +129,9 @@ export class AdjustGLRenderer {
   private kindBuf = new Int32Array(MAX_MASKS);
   private geomABuf = new Float32Array(MAX_MASKS * 4);
   private geomBBuf = new Float32Array(MAX_MASKS * 4);
+  // u_maskGeomC: (lumLow, lumHigh, _, _) — luminance gate for both kinds.
+  // Defaults (0, 1) ⇒ identity ⇒ byte-identical to pre-feature behavior.
+  private geomCBuf = new Float32Array(MAX_MASKS * 4);
   private sliders0Buf = new Float32Array(MAX_MASKS * 4);
   private sliders1Buf = new Float32Array(MAX_MASKS * 4);
   private blackPointBuf = new Float32Array(MAX_MASKS);
@@ -196,6 +210,7 @@ export class AdjustGLRenderer {
       u_maskKind: requireLocation(gl, this.program, 'u_maskKind[0]'),
       u_maskGeomA: requireLocation(gl, this.program, 'u_maskGeomA[0]'),
       u_maskGeomB: requireLocation(gl, this.program, 'u_maskGeomB[0]'),
+      u_maskGeomC: requireLocation(gl, this.program, 'u_maskGeomC[0]'),
       u_maskSliders0: requireLocation(gl, this.program, 'u_maskSliders0[0]'),
       u_maskSliders1: requireLocation(gl, this.program, 'u_maskSliders1[0]'),
       u_maskBlackPoint: requireLocation(gl, this.program, 'u_maskBlackPoint[0]'),
@@ -279,6 +294,7 @@ export class AdjustGLRenderer {
     this.kindBuf.fill(0);
     this.geomABuf.fill(0);
     this.geomBBuf.fill(0);
+    this.geomCBuf.fill(0);
     this.sliders0Buf.fill(0);
     this.sliders1Buf.fill(0);
     this.blackPointBuf.fill(0);
@@ -295,6 +311,11 @@ export class AdjustGLRenderer {
       this.sliders1Buf[i * 4 + 2] = p.shadows;
       this.sliders1Buf[i * 4 + 3] = p.whitePoint;
       this.blackPointBuf[i] = p.blackPoint;
+
+      // Luminance gate: defaults (0, 1) match the shader's no-op branch
+      // (lumLow ≤ 0 && lumHigh ≥ 1), so unset gate stays byte-identical.
+      this.geomCBuf[i * 4 + 0] = m.lumLow ?? 0;
+      this.geomCBuf[i * 4 + 1] = m.lumHigh ?? 1;
 
       if (m.kind === 'linear') {
         this.kindBuf[i] = 0;
@@ -322,6 +343,7 @@ export class AdjustGLRenderer {
     gl.uniform1iv(u.u_maskKind, this.kindBuf);
     gl.uniform4fv(u.u_maskGeomA, this.geomABuf);
     gl.uniform4fv(u.u_maskGeomB, this.geomBBuf);
+    gl.uniform4fv(u.u_maskGeomC, this.geomCBuf);
     gl.uniform4fv(u.u_maskSliders0, this.sliders0Buf);
     gl.uniform4fv(u.u_maskSliders1, this.sliders1Buf);
     gl.uniform1fv(u.u_maskBlackPoint, this.blackPointBuf);

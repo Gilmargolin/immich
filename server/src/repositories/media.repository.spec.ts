@@ -763,6 +763,76 @@ describe(MediaRepository.name, () => {
       expect(avg.r).toBeCloseTo(128, -1);
     });
 
+    // Luminance gate parity with TS reference (web/src/lib/managers/edit/
+    // adjust-math.spec.ts). lumLow/lumHigh scale a mask's effect by a smooth
+    // function of luminance — dark pixels (below lumLow) see less effect,
+    // bright pixels (above lumHigh) see less effect.
+    it('should leave dark pixels alone when lumLow=0.5/lumHigh=1 even inside the mask', async () => {
+      // sRGB 30 ≈ 0.0116 linear — well below lumLow=0.5 minus the feather
+      // band, so the gate is ~0 and the brightness mask has no effect.
+      const imageBuffer = await buildGrayImage(30);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.5,
+                ry: 0.5,
+                angle: 0,
+                feather: 0.05,
+                invert: false,
+                lumLow: 0.5,
+                lumHigh: 1,
+                params: { ...defaultAdjust, brightness: 1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const center = await getPixelColor(buffer, 50, 50);
+      expect(Math.abs(center.r - 30)).toBeLessThan(5);
+    });
+
+    it('should fully apply the mask to bright pixels when lumLow=0.5/lumHigh=1', async () => {
+      // sRGB 230 ≈ 0.79 linear — well above lumLow=0.5 + band, so the gate
+      // is ~1 and brightness=+1 (×4 in linear) clips the byte to 255.
+      const imageBuffer = await buildGrayImage(230);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.5,
+                ry: 0.5,
+                angle: 0,
+                feather: 0.05,
+                invert: false,
+                lumLow: 0.5,
+                lumHigh: 1,
+                params: { ...defaultAdjust, brightness: 1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const center = await getPixelColor(buffer, 50, 50);
+      expect(center.r).toBeGreaterThan(250);
+    });
+
     it('should support inverted radial masks (effect outside the ellipse)', async () => {
       const imageBuffer = await buildGrayImage(180);
       const result = await sut['applyEdits'](sharp(imageBuffer), [

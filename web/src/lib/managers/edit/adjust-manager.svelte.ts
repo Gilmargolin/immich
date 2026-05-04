@@ -41,6 +41,9 @@ const slidersActive = (v: AdjustmentValues): boolean =>
 
 // Defaults for newly-added masks. Centered, ~30% of image dimensions, no
 // adjustments yet — the user picks sliders after creation.
+// lumLow=0, lumHigh=1 are the identity values for the luminance gate (gate is
+// inactive). Set explicitly so the saved JSON round-trips cleanly through the
+// UI, but absence in older saved data still defaults to the same identity.
 const defaultLinearMask = (): LocalMask => ({
   kind: 'linear',
   ax: 0.5,
@@ -48,6 +51,8 @@ const defaultLinearMask = (): LocalMask => ({
   bx: 0.5,
   by: 0.6,
   mid: 0.5,
+  lumLow: 0,
+  lumHigh: 1,
   params: { ...defaultValues },
 });
 
@@ -60,6 +65,8 @@ const defaultRadialMask = (): LocalMask => ({
   angle: 0,
   feather: 0.2,
   invert: false,
+  lumLow: 0,
+  lumHigh: 1,
   params: { ...defaultValues },
 });
 
@@ -277,6 +284,8 @@ export class AdjustManager implements EditToolManager {
       bx,
       by,
       mid: 0.5,
+      lumLow: 0,
+      lumHigh: 1,
       params: { ...defaultValues },
     };
     this.masks = [...this.masks, mask];
@@ -302,6 +311,8 @@ export class AdjustManager implements EditToolManager {
       angle: 0,
       feather: 0.2,
       invert: false,
+      lumLow: 0,
+      lumHigh: 1,
       params: { ...defaultValues },
     };
     this.masks = [...this.masks, mask];
@@ -324,6 +335,18 @@ export class AdjustManager implements EditToolManager {
 
   updateMask(index: number, mask: LocalMask): void {
     this.masks = this.masks.map((m, i) => (i === index ? mask : m));
+  }
+
+  // Set the luminance gate for a mask, clamping to [0, 1] and enforcing
+  // lumLow ≤ lumHigh so the server's class-validator never has to reject.
+  setLumGate(index: number, lumLow: number, lumHigh: number): void {
+    const lo = Math.min(1, Math.max(0, lumLow));
+    const hi = Math.min(1, Math.max(0, lumHigh));
+    const orderedLo = Math.min(lo, hi);
+    const orderedHi = Math.max(lo, hi);
+    this.masks = this.masks.map((m, i) =>
+      i === index ? ({ ...m, lumLow: orderedLo, lumHigh: orderedHi } as LocalMask) : m,
+    );
   }
 
   selectMask(index: number | null): void {

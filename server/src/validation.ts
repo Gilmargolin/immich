@@ -100,6 +100,25 @@ export function IsAxisAlignedRotation() {
   );
 }
 
+@ValidatorConstraint({ name: 'lumHighGteLow' })
+class LumHighGteLowValidator implements ValidatorConstraintInterface {
+  // Property-level: applied to lumHigh; verifies lumHigh >= sibling lumLow
+  // when both are present. If either is undefined the per-property defaults
+  // (lumLow=0, lumHigh=1) trivially satisfy the constraint.
+  validate(value: unknown, args: ValidationArguments): boolean {
+    const obj = args.object as { lumLow?: unknown };
+    if (typeof value === 'number' && typeof obj.lumLow === 'number') {
+      return value >= obj.lumLow;
+    }
+    return true;
+  }
+  defaultMessage(): string {
+    return 'lumHigh must be greater than or equal to lumLow';
+  }
+}
+
+export const IsLumHighGteLow = () => Validate(LumHighGteLowValidator);
+
 @ValidatorConstraint({ name: 'uniqueEditActions' })
 class UniqueEditActionsValidator implements ValidatorConstraintInterface {
   validate(edits: { action: string; parameters?: unknown }[]): boolean {

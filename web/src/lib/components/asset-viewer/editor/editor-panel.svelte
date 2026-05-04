@@ -441,6 +441,68 @@
       </ul>
     {/if}
 
+    {#if adjustManager.selectedMaskIndex !== null && adjustManager.masks[adjustManager.selectedMaskIndex]}
+      {@const selMask = adjustManager.masks[adjustManager.selectedMaskIndex]}
+      {@const selIdx = adjustManager.selectedMaskIndex}
+      {@const lumLow = selMask.lumLow ?? 0}
+      {@const lumHigh = selMask.lumHigh ?? 1}
+      <!-- Per-mask luminance gate. Two thumbs over a 0..1 range, rendered as
+           a single bar with a highlighted active band between low and high.
+           Defaults at 0 and 1 (= identity, no behavior change). Use case: a
+           small radial around a bird where you want to brighten only the
+           dark feathers and leave the white cheek untouched. -->
+      <div class="mt-2 mb-1 px-1">
+        <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+          <span>Limit by luminance</span>
+          <button
+            type="button"
+            class="text-gray-400 hover:text-white tabular-nums disabled:opacity-30 disabled:hover:text-gray-400"
+            disabled={lumLow === 0 && lumHigh === 1}
+            onclick={() => adjustManager.setLumGate(selIdx, 0, 1)}
+            title="Reset luminance gate"
+            aria-label="Reset luminance gate"
+          >
+            {Math.round(lumLow * 100)}–{Math.round(lumHigh * 100)}
+          </button>
+        </div>
+        <!-- Two-thumb pattern: a track + active-band div underneath, with two
+             native range inputs stacked on top. Container catches no pointer
+             events; only the slider thumbs do (cross-browser via the modern
+             pseudo-element selectors). The wider thumb-hit-region handles the
+             "thumbs at the same value" overlap reasonably. -->
+        <div class="relative h-5">
+          <div class="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded bg-gray-700"></div>
+          <div
+            class="absolute top-1/2 -translate-y-1/2 h-1 rounded bg-immich-primary"
+            style:left="{lumLow * 100}%"
+            style:right="{(1 - lumHigh) * 100}%"
+          ></div>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={lumLow}
+            oninput={(e) =>
+              adjustManager.setLumGate(selIdx, Number.parseFloat((e.target as HTMLInputElement).value), lumHigh)}
+            aria-label="Luminance gate lower bound"
+            class="absolute inset-x-0 top-0 h-full w-full appearance-none bg-transparent pointer-events-none accent-immich-primary [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto"
+          />
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={lumHigh}
+            oninput={(e) =>
+              adjustManager.setLumGate(selIdx, lumLow, Number.parseFloat((e.target as HTMLInputElement).value))}
+            aria-label="Luminance gate upper bound"
+            class="absolute inset-x-0 top-0 h-full w-full appearance-none bg-transparent pointer-events-none accent-immich-primary [&::-webkit-slider-thumb]:pointer-events-auto [&::-moz-range-thumb]:pointer-events-auto"
+          />
+        </div>
+      </div>
+    {/if}
+
     <!-- Light adjustments -->
     <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-2">
       {$t('adjust_light')}{adjustManager.selectedMaskIndex !== null

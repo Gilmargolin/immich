@@ -46,6 +46,19 @@ export const smoothstep = (edge0: number, edge1: number, x: number): number => {
   return t * t * (3 - 2 * t);
 };
 
+// Smooth in-band/out-of-band gate on Rec.709 linear luminance. Returns 1
+// inside [lo, hi], smoothly drops to 0 over a fixed feather band of LUM_BAND
+// on each side. Mirrored byte-for-byte in
+// server/src/repositories/media.repository.ts and adjust-shader.ts.
+export const LUM_BAND = 0.05;
+export const lumKey = (y: number, lo: number, hi: number): number => {
+  const inLow = smoothstep(lo - LUM_BAND, lo, y);
+  const inHigh = 1 - smoothstep(hi, hi + LUM_BAND, y);
+  return inLow * inHigh;
+};
+
+export const isLumGateActive = (lumLow: number, lumHigh: number): boolean => lumLow > 0 || lumHigh < 1;
+
 export const applyContrastChannel = (v: number, k: number): number => {
   const clamped = v < 0 ? 0 : v > 1 ? 1 : v;
   if (k >= 0) {
@@ -192,7 +205,18 @@ export const applyAdjustToPixel = (
   rgb = applySliders(rgb, globals);
 
   for (const mask of masks) {
-    const w = maskWeight(mask, px, py, width, height);
+    let w = maskWeight(mask, px, py, width, height);
+    if (w > 0) {
+      const lumLow = mask.lumLow ?? 0;
+      const lumHigh = mask.lumHigh ?? 1;
+      if (isLumGateActive(lumLow, lumHigh)) {
+        // Sample luminance from the current linear-light RGB (after global +
+        // any earlier masks) so the gate responds to "what's there now".
+        const yLin = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+        const yClamped = yLin < 0 ? 0 : yLin > 1 ? 1 : yLin;
+        w *= lumKey(yClamped, lumLow, lumHigh);
+      }
+    }
     if (w > 0) {
       const masked = applySliders(rgb, mask.params);
       rgb = {

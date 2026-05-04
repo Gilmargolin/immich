@@ -13,7 +13,13 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { IsAxisAlignedRotation, IsUniqueEditActions, ValidateEnum, ValidateUUID } from 'src/validation';
+import {
+  IsAxisAlignedRotation,
+  IsLumHighGteLow,
+  IsUniqueEditActions,
+  ValidateEnum,
+  ValidateUUID,
+} from 'src/validation';
 
 export enum AssetEditAction {
   Crop = 'crop',
@@ -152,6 +158,34 @@ export class LinearMask {
   })
   mid?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({
+    required: false,
+    description:
+      'Luminance gate lower bound (0..1, default 0). Pixels with Rec.709 ' +
+      'luminance below lumLow receive less mask weight, smoothly falling to ' +
+      'zero over a fixed band. Use together with lumHigh to limit a mask to ' +
+      'a luminance range (e.g. only the dark feathers of a bird).',
+  })
+  lumLow?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsLumHighGteLow()
+  @ApiProperty({
+    required: false,
+    description:
+      'Luminance gate upper bound (0..1, default 1). Pixels with luminance ' +
+      'above lumHigh receive less mask weight, smoothly falling to zero. ' +
+      'Must satisfy lumLow ≤ lumHigh.',
+  })
+  lumHigh?: number;
+
   @ValidateNested()
   @Type(() => AdjustmentSliders)
   @ApiProperty({ description: 'Adjustments to apply where this mask has weight > 0' })
@@ -203,6 +237,34 @@ export class RadialMask {
       'Bias toward 0 to keep the falloff sharp near the inner edge; toward 1 to keep it sharp near the outer edge.',
   })
   mid?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({
+    required: false,
+    description:
+      'Luminance gate lower bound (0..1, default 0). Pixels with Rec.709 ' +
+      'luminance below lumLow receive less mask weight, smoothly falling to ' +
+      'zero over a fixed band. Use together with lumHigh to limit a mask to ' +
+      'a luminance range (e.g. only the dark feathers of a bird).',
+  })
+  lumLow?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsLumHighGteLow()
+  @ApiProperty({
+    required: false,
+    description:
+      'Luminance gate upper bound (0..1, default 1). Pixels with luminance ' +
+      'above lumHigh receive less mask weight, smoothly falling to zero. ' +
+      'Must satisfy lumLow ≤ lumHigh.',
+  })
+  lumHigh?: number;
 
   @ValidateNested()
   @Type(() => AdjustmentSliders)
