@@ -447,6 +447,36 @@ describe(MediaRepository.name, () => {
       expect(Math.abs(avg.r - 128)).toBeLessThan(5);
     });
 
+    // Regression: the live preview in crop mode used to apply an SVG
+    // `feFuncR type=gamma` curve here, which produced a visibly different
+    // result from `applyAdjustments` on save. Pin the saved-side numbers
+    // so a future divergence (e.g. dropping the negative branch in
+    // `precomputeSliders`/`applyPrecomputedSliders`) breaks the test.
+    it('should darken highlights on a bright image when highlights = -1', async () => {
+      const imageBuffer = await buildGrayImage(220);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, highlights: -1 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // For input byte 220, y_linear ≈ 0.716, smoothstep(0.5, 1, y) ≈ 0.40,
+      // dy ≈ -0.099, scale ≈ 0.86; sRGB byte should land near 206.
+      expect(avg.r).toBeGreaterThan(195);
+      expect(avg.r).toBeLessThan(215);
+    });
+
+    it('should leave mid-tones alone when highlights = -1', async () => {
+      const imageBuffer = await buildGrayImage(128);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        { action: AssetEditAction.Adjust, parameters: { ...defaultAdjust, highlights: -1 } },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      expect(Math.abs(avg.r - 128)).toBeLessThan(5);
+    });
+
     it('should lift shadows on a dark image', async () => {
       const imageBuffer = await buildGrayImage(50);
       const result = await sut['applyEdits'](sharp(imageBuffer), [

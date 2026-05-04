@@ -81,6 +81,27 @@ describe('applyAdjustToPixel — global sliders', () => {
     expect(Math.abs(mid.r - 128)).toBeLessThan(5);
   });
 
+  // Regression: an earlier crop-mode preview applied an SVG `feFuncR
+  // type=gamma` curve here (gamma = 1 / (1 + highlights·0.5) = 2 for
+  // highlights=-1), which over-darkened mid-tones AND highlights compared
+  // to what `applyAdjustments` writes on save. Pin the actual saved-side
+  // behaviour: highlights=-1 makes a near-white pixel a touch darker (the
+  // luminance mask weights are sub-1 even up at byte 220) and is a no-op
+  // on a true mid-gray (mask is exactly 0 there).
+  it('highlights -1 darkens a near-white pixel by roughly the smoothstep mask amount', () => {
+    const bright = applyAt([220, 220, 220], { highlights: -1 });
+    // For input byte 220, y_linear ≈ 0.716, smoothstep(0.5, 1, y) ≈ 0.40,
+    // dy ≈ -0.099, scale ≈ 0.86; back through sRGB the byte lands ~206.
+    // Allow a small band, but reject the SVG-gamma over-darkening (≤180).
+    expect(bright.r).toBeGreaterThan(195);
+    expect(bright.r).toBeLessThan(215);
+  });
+
+  it('highlights -1 barely touches mid-gray (luminance mask is ~0 there)', () => {
+    const mid = applyAt([128, 128, 128], { highlights: -1 });
+    expect(Math.abs(mid.r - 128)).toBeLessThan(5);
+  });
+
   it('shadows +0.5 lifts dark gray but barely touches near-white', () => {
     const dark = applyAt([50, 50, 50], { shadows: 0.5 });
     expect(dark.r).toBeGreaterThan(50);

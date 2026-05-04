@@ -2,10 +2,10 @@
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
+  import { AdjustGLRenderer, FULL_CROP } from '$lib/managers/edit/adjust-webgl';
   import { getAssetMediaUrl } from '$lib/utils';
-  import { getAltText } from '$lib/utils/thumbnail-util';
-  import { toTimelineAsset } from '$lib/utils/timeline-util';
   import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
+  import { onDestroy } from 'svelte';
   import { t } from 'svelte-i18n';
 
   interface Props {
@@ -15,21 +15,9 @@
   let { asset }: Props = $props();
 
   let canvasContainer = $state<HTMLElement | null>(null);
-
-  let adjustParams = $derived(adjustManager.svgFilterParams);
-  let hasAdjustments = $derived(adjustManager.canReset);
-  let saturationMatrix = $derived.by(() => {
-    const s = 1 + adjustManager.values.saturation;
-    const lumR = 0.3086;
-    const lumG = 0.6094;
-    const lumB = 0.0820;
-    return [
-      (lumR * (1 - s)) + s, lumG * (1 - s),       lumB * (1 - s),       0, 0,
-      lumR * (1 - s),       (lumG * (1 - s)) + s,  lumB * (1 - s),       0, 0,
-      lumR * (1 - s),       lumG * (1 - s),        (lumB * (1 - s)) + s, 0, 0,
-      0,                    0,                      0,                    1, 0,
-    ].join(' ');
-  });
+  let cropCanvasEl = $state<HTMLCanvasElement | null>(null);
+  let cropCanvasRenderer: AdjustGLRenderer | null = null;
+  let cropImageReady = $state(false);
 
   let imageSrc = $derived(
     getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, edited: false, size: AssetMediaSize.Preview }),
@@ -37,17 +25,80 @@
   // Hold-to-compare URL (default `edited: true` returns the saved/edited preview).
   let savedSrc = $derived(getAssetMediaUrl({ id: asset.id, cacheKey: asset.thumbhash, size: AssetMediaSize.Preview }));
 
-  // Force browser to re-evaluate SVG filter when adjust params change.
-  // Browsers cache SVG filter results and may not re-render when filter attributes update.
+  // Initialise the WebGL renderer on the crop canvas. Mirrors the adjust-area
+  // approach so the crop-mode preview uses the same math the server runs on
+  // save — the previous SVG-filter fallback used a per-channel gamma curve
+  // that drastically over-darkened mid-tones for highlights/shadows sliders,
+  // so the live preview disagreed with the saved file.
   $effect(() => {
-    const _p = adjustParams;
-    const _s = saturationMatrix;
-    const el = transformManager.domImgEl;
-    if (el) {
-      el.style.filter = 'none';
-      void el.offsetWidth;
-      el.style.filter = 'url(#crop-adjust-filter)';
+    if (!cropCanvasEl || cropCanvasRenderer) return;
+    // Expose the canvas to the transform manager (it reads style.width/height
+    // for layout — both <canvas> and <img> work here).
+    transformManager.domImgEl = cropCanvasEl;
+    try {
+      cropCanvasRenderer = new AdjustGLRenderer(cropCanvasEl);
+    } catch (error) {
+      console.warn('WebGL preview unavailable in crop area', error);
+      cropCanvasRenderer = null;
     }
+  });
+
+  $effect(() => {
+    const url = imageSrc;
+    if (!url || !cropCanvasRenderer) return;
+    let cancelled = false;
+    cropImageReady = false;
+    const el = new Image();
+    el.crossOrigin = 'anonymous';
+    el.decoding = 'async';
+    el.onload = () => {
+      if (cancelled || !cropCanvasRenderer) return;
+      cropCanvasRenderer.setImage(el);
+      cropCanvasRenderer.resizeCanvas(FULL_CROP);
+      cropImageReady = true;
+      scheduleCropRender();
+    };
+    el.onerror = () => {
+      if (!cancelled) console.warn('Failed to load crop preview image', url);
+    };
+    el.src = url;
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  let pendingCropRaf: number | null = null;
+  const scheduleCropRender = () => {
+    if (pendingCropRaf !== null) return;
+    pendingCropRaf = requestAnimationFrame(() => {
+      pendingCropRaf = null;
+      if (cropCanvasRenderer && cropImageReady) {
+        cropCanvasRenderer.render(adjustManager.values, adjustManager.masks, FULL_CROP);
+      }
+    });
+  };
+
+  $effect(() => {
+    void adjustManager.values.brightness;
+    void adjustManager.values.contrast;
+    void adjustManager.values.saturation;
+    void adjustManager.values.warmth;
+    void adjustManager.values.tint;
+    void adjustManager.values.highlights;
+    void adjustManager.values.shadows;
+    void adjustManager.values.whitePoint;
+    void adjustManager.values.blackPoint;
+    void adjustManager.masks;
+    scheduleCropRender();
+  });
+
+  onDestroy(() => {
+    if (pendingCropRaf !== null) {
+      cancelAnimationFrame(pendingCropRaf);
+      pendingCropRaf = null;
+    }
+    cropCanvasRenderer?.dispose();
+    cropCanvasRenderer = null;
   });
 
   /**
@@ -225,20 +276,6 @@
   }
 </script>
 
-<svg class="absolute" width="0" height="0">
-  <defs>
-    <filter id="crop-adjust-filter" color-interpolation-filters="sRGB">
-      <feComponentTransfer>
-        <feFuncR type="gamma" amplitude={adjustParams.r.slope} exponent={adjustParams.r.gamma} offset={adjustParams.r.intercept} />
-        <feFuncG type="gamma" amplitude={adjustParams.g.slope} exponent={adjustParams.g.gamma} offset={adjustParams.g.intercept} />
-        <feFuncB type="gamma" amplitude={adjustParams.b.slope} exponent={adjustParams.b.gamma} offset={adjustParams.b.intercept} />
-      </feComponentTransfer>
-      {#if adjustManager.values.saturation !== 0}
-        <feColorMatrix type="matrix" values={saturationMatrix} />
-      {/if}
-    </filter>
-  </defs>
-</svg>
 <div class="canvas-container" bind:this={canvasContainer}>
   <div class="crop-viewport">
     <button
@@ -251,14 +288,11 @@
       aria-label="Crop area"
       type="button"
     >
-      <img
-        bind:this={transformManager.domImgEl}
-        draggable="false"
-        src={imageSrc}
-        alt={$getAltText(toTimelineAsset(asset))}
+      <canvas
+        bind:this={cropCanvasEl}
+        aria-label={$t('editor')}
         style:transform={imageTransform || undefined}
-        style:filter="url(#crop-adjust-filter)"
-      />
+      ></canvas>
       <div
         class={`${showGrid ? 'resizing' : ''} crop-frame`}
         bind:this={transformManager.cropFrame}
@@ -411,14 +445,14 @@
     opacity: 1;
   }
 
-  .crop-area img {
+  .crop-area > canvas {
     display: block;
     user-select: none;
     transition: transform 0.15s ease;
     transform-origin: center center;
     /* Explicit width/height are set by transformManager.applyImageSize()
        via inline style — we deliberately don't constrain here so the JS
-       values are authoritative and the image always fits the viewport. */
+       values are authoritative and the canvas always fits the viewport. */
   }
 
   .crop-frame {

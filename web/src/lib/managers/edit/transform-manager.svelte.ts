@@ -60,11 +60,16 @@ class TransformManager implements EditToolManager {
   dragAnchor = $state({ x: 0, y: 0 });
   resizeSide = $state(ResizeBoundary.None);
   imgElement = $state<HTMLImageElement | null>(null);
-  // The DOM <img> that's actually rendered inside the crop area. We need
+  // The DOM element that's actually rendered inside the crop area. We need
   // its live clientWidth to compute the scale accurately on resize —
   // cropAreaEl.clientWidth can get pinned to the image's intrinsic size
-  // by CSS `width: max-content` and stop tracking the viewport.
-  domImgEl = $state<HTMLImageElement | null>(null);
+  // by CSS `width: max-content` and stop tracking the viewport. Originally
+  // an <img>; now a <canvas> backed by the WebGL adjust renderer so the live
+  // preview uses the same math as the saved file (the SVG filter that the
+  // <img> was relying on couldn't replicate the luminance-mask highlights/
+  // shadows math the server uses, so the preview drifted from the saved
+  // photo on those sliders).
+  domImgEl = $state<HTMLElement | null>(null);
   cropAreaEl = $state<HTMLElement | null>(null);
   overlayEl = $state<HTMLElement | null>(null);
   cropFrame = $state<HTMLElement | null>(null);
