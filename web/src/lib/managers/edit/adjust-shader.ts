@@ -28,6 +28,8 @@ void main() {
 //                                    rx/ry normalized to min(W, H)
 //   u_maskGeomB[i]       : linear → (mid, _, _, _)
 //                          radial → (angleDeg, feather, invert?1:0, mid)
+//   u_maskGeomC[i]       : (lumLow, lumHigh, _, _) — luminance gate, both kinds.
+//                          Defaults (0, 1) ⇒ identity (no behavior change).
 //   u_maskSliders0[i]    : (brightness, contrast, saturation, warmth)
 //   u_maskSliders1[i]    : (tint, highlights, shadows, whitePoint)
 //   u_maskBlackPoint[i]  : blackPoint
@@ -61,6 +63,7 @@ uniform int u_maskCount;
 uniform int u_maskKind[MAX_MASKS];
 uniform vec4 u_maskGeomA[MAX_MASKS];
 uniform vec4 u_maskGeomB[MAX_MASKS];
+uniform vec4 u_maskGeomC[MAX_MASKS];
 uniform vec4 u_maskSliders0[MAX_MASKS];
 uniform vec4 u_maskSliders1[MAX_MASKS];
 uniform float u_maskBlackPoint[MAX_MASKS];
@@ -68,6 +71,16 @@ uniform float u_maskBlackPoint[MAX_MASKS];
 float smoothStepF(float edge0, float edge1, float x) {
   float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
   return t * t * (3.0 - 2.0 * t);
+}
+
+// Smooth in-band/out-of-band gate on Rec.709 linear luminance. Mirrors
+// lumKey() in adjust-math.ts and media.repository.ts. Fixed feather band
+// LUM_BAND on each side. Defaults (0, 1) ⇒ identity.
+const float LUM_BAND = 0.05;
+float lumKey(float y, float lo, float hi) {
+  float inLow = smoothStepF(lo - LUM_BAND, lo, y);
+  float inHigh = 1.0 - smoothStepF(hi, hi + LUM_BAND, y);
+  return inLow * inHigh;
 }
 
 vec3 srgbToLinear(vec3 c) {
@@ -204,6 +217,18 @@ void main() {
   for (int i = 0; i < MAX_MASKS; ++i) {
     if (i >= u_maskCount) break;
     float w = maskWeight(i, px);
+    if (w > 0.0) {
+      // Optional luminance gate. Defaults (0, 1) make lumKey == 1 over the
+      // entire image so unset gates are byte-identical to pre-feature behavior.
+      float lumLow = u_maskGeomC[i].x;
+      float lumHigh = u_maskGeomC[i].y;
+      if (lumLow > 0.0 || lumHigh < 1.0) {
+        // Sample luminance from the current linear-light RGB (after global +
+        // any earlier masks) so the gate responds to "what's there now".
+        float yLin = clamp(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+        w *= lumKey(yLin, lumLow, lumHigh);
+      }
+    }
     if (w > 0.0) {
       vec4 s0 = u_maskSliders0[i];
       vec4 s1 = u_maskSliders1[i];
