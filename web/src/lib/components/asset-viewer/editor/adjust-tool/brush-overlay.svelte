@@ -19,7 +19,7 @@
   //   - On pointerup, the offscreen canvas is `toDataURL`'d into the mask DTO.
   //
   // UX:
-  //   - Brush size slider (10–200 px in offscreen-canvas units, default 50).
+  //   - Brush size slider (1–200 px in offscreen-canvas units, default 50).
   //     Cursor is a circle of that size on screen.
   //   - Drag = paint additively (lighter-color composite so strokes accumulate).
   //   - Right-click drag OR Alt+drag = erase (destination-out).
@@ -87,8 +87,26 @@
       if (!offscreenCtx) {
         return;
       }
+      // The saved PNG is opaque greyscale: painted = white RGB, unpainted =
+      // black RGB, alpha = 1 everywhere. The OFFSCREEN canvas, by contrast,
+      // is kept in "white RGB + alpha = mask weight" form so paint strokes
+      // composite correctly and `redrawDisplay` (source-in red on top of
+      // alpha) tints only the painted region. So after drawing the loaded
+      // image we re-key the canvas: copy the R channel into alpha and set
+      // RGB to white. Without this the loaded mask reads as fully opaque
+      // and the red tint smears across the whole photo.
       offscreenCtx.clearRect(0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
       offscreenCtx.drawImage(img, 0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
+      const imgData = offscreenCtx.getImageData(0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const grey = data[i];
+        data[i] = 255;
+        data[i + 1] = 255;
+        data[i + 2] = 255;
+        data[i + 3] = grey;
+      }
+      offscreenCtx.putImageData(imgData, 0, 0);
       redrawDisplay();
     });
     img.src = url;
@@ -337,7 +355,7 @@
     >
       <label class="flex items-center gap-2">
         Brush
-        <input type="range" min="10" max="200" bind:value={brushSize} class="w-32" />
+        <input type="range" min="1" max="200" bind:value={brushSize} class="w-32" />
         <span class="tabular-nums">{brushSize}px</span>
         <span class="ms-2 text-gray-300">Alt or right-click to erase</span>
       </label>
