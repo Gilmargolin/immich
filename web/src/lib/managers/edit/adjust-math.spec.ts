@@ -11,7 +11,7 @@
 // headless WebGL). Visual parity between TS reference and shader is enforced
 // by code review + the line-by-line correspondence between the two files.
 
-import { applyAdjustToPixel } from '$lib/managers/edit/adjust-math';
+import { applyAdjustToPixel, type BrushMaskBuffer } from '$lib/managers/edit/adjust-math';
 import type { AdjustmentSliders, LocalMask } from '$lib/managers/edit/adjust-webgl';
 
 const ZERO: AdjustmentSliders = {
@@ -35,7 +35,8 @@ const applyAt = (
   height = 100,
   px = 50,
   py = 50,
-) => applyAdjustToPixel(rgb[0], rgb[1], rgb[2], { ...ZERO, ...globals }, masks, px, py, width, height);
+  brushBuffers?: (BrushMaskBuffer | null | undefined)[],
+) => applyAdjustToPixel(rgb[0], rgb[1], rgb[2], { ...ZERO, ...globals }, masks, px, py, width, height, brushBuffers);
 
 describe('applyAdjustToPixel — global sliders', () => {
   it('round-trips a sRGB pixel when all sliders are zero', () => {
@@ -233,6 +234,38 @@ describe('applyAdjustToPixel — local masks', () => {
     // brighter than mask-1-alone.
     expect(stacked.r).toBeGreaterThan(128);
     expect(stacked.r).toBeGreaterThan(onlyDark.r);
+  });
+
+  it('brush mask: painted pixel sees adjustment, unpainted does not', () => {
+    // Build a tiny synthetic brush mask: 4×4, fully painted (255) in the
+    // bottom-right 2×2 quadrant, fully transparent (0) elsewhere. Avoid PNG
+    // decoding here — the math reference accepts a raw buffer so the spec
+    // doesn't need a browser canvas/PNG codec.
+    const buffer = new Uint8ClampedArray([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 255, 255]);
+    const brushBuffer: BrushMaskBuffer = { buffer, width: 4, height: 4 };
+    const mask: LocalMask = { kind: 'brush', mask: '', params: { ...ZERO, brightness: -1 } };
+
+    // Image is 100×100. Pixel (10, 10) maps to UV (0.10, 0.10) → mask cell
+    // ~ (0.30, 0.30) → top-left quadrant → unpainted, byte ≈ 0.
+    const unpainted = applyAt([180, 180, 180], {}, [mask], 100, 100, 10, 10, [brushBuffer]);
+    // Pixel (95, 95) maps to UV (0.95, 0.95) → mask cell ~ (2.85, 2.85) →
+    // bottom-right quadrant → fully painted, byte ≈ 255.
+    const painted = applyAt([180, 180, 180], {}, [mask], 100, 100, 95, 95, [brushBuffer]);
+
+    expect(unpainted.r).toBeGreaterThan(170);
+    expect(unpainted.r).toBeLessThan(190);
+    // brightness=-1 with weight=1 cuts linear-light by 4× → byte 180 lands
+    // around 95 after sRGB round-trip (matches the linear/radial brightness
+    // tests above for an in-effect pixel).
+    expect(painted.r).toBeLessThan(120);
+  });
+
+  it('brush mask without a buffer contributes nothing', () => {
+    const mask: LocalMask = { kind: 'brush', mask: '', params: { ...ZERO, brightness: -1 } };
+    // No brushBuffers passed → the brush sample defaults to 0 → unchanged.
+    const out = applyAt([180, 180, 180], {}, [mask], 100, 100, 50, 50);
+    expect(out.r).toBeGreaterThan(170);
+    expect(out.r).toBeLessThan(190);
   });
 
   it('a mask with all-zero params is a no-op', () => {

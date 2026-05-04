@@ -11,6 +11,7 @@ import {
   AdjustmentSliders,
   AdjustParameters,
   AssetEditActionItem,
+  BRUSH_MASK_RESOLUTION,
   LocalMask,
   LocalMaskKind,
 } from 'src/dtos/editing.dto';
@@ -238,15 +239,98 @@ const lumKey = (y: number, lo: number, hi: number): number => {
 
 const isLumGateActive = (lumLow: number, lumHigh: number): boolean => lumLow > 0 || lumHigh < 1;
 
+// Bilinear sample of a single-channel mask buffer at fractional pixel
+// coordinates. The buffer is treated as `mw × mh` bytes (one byte per pixel),
+// the result is normalized to [0, 1]. Out-of-range UVs are clamped to the
+// nearest edge (matching `CLAMP_TO_EDGE` on the WebGL side).
+//
+// Exported only for the spec — `applyAdjustments` calls into a closure that
+// captures the buffer once per pixel loop, avoiding repeated lookups.
+export const bilinearSampleBrush = (
+  buffer: Uint8Array | Uint8ClampedArray,
+  mw: number,
+  mh: number,
+  u: number,
+  v: number,
+): number => {
+  const cu = Math.min(1, Math.max(0, u));
+  const cv = Math.min(1, Math.max(0, v));
+  const fx = cu * (mw - 1);
+  const fy = cv * (mh - 1);
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = Math.min(mw - 1, x0 + 1);
+  const y1 = Math.min(mh - 1, y0 + 1);
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const i00 = y0 * mw + x0;
+  const i10 = y0 * mw + x1;
+  const i01 = y1 * mw + x0;
+  const i11 = y1 * mw + x1;
+  const a = buffer[i00] * (1 - tx) + buffer[i10] * tx;
+  const b = buffer[i01] * (1 - tx) + buffer[i11] * tx;
+  return (a * (1 - ty) + b * ty) / 255;
+};
+
+// Strip a `data:image/png;base64,` prefix if present and decode the PNG to a
+// `BRUSH_MASK_RESOLUTION × BRUSH_MASK_RESOLUTION` single-channel buffer. We
+// always resize to the canonical resolution (clients are expected to send
+// already-canonical PNGs, but resizing is cheap and forgiving). Returns null
+// on any decoding failure — callers treat that as a no-op mask so a malformed
+// brush stroke doesn't crash the whole save.
+export const decodeBrushMask = async (encoded: string): Promise<Uint8Array | null> => {
+  try {
+    const base64 = encoded.startsWith('data:') ? encoded.slice(encoded.indexOf(',') + 1) : encoded;
+    const png = Buffer.from(base64, 'base64');
+    const { data } = await sharp(png)
+      .resize(BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION, { fit: 'fill' })
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  } catch {
+    return null;
+  }
+};
+
 // Build a per-pixel weight function from a LocalMask. Coordinates in the mask
 // DTO are normalized: cx/ax/etc to [0,1] of image width; cy/ay/etc to [0,1] of
 // image height. Radial rx/ry are normalized to min(W, H) so rx=ry renders as a
-// circle regardless of image aspect.
-const precomputeMask = (mask: LocalMask, width: number, height: number): PrecomputedMask => {
+// circle regardless of image aspect. Brush masks are pre-decoded by the
+// caller; the decoded buffer is passed in via `decodedBrushBuffer`.
+const precomputeMask = (
+  mask: LocalMask,
+  width: number,
+  height: number,
+  decodedBrushBuffer?: Uint8Array | null,
+): PrecomputedMask => {
   const sliders = precomputeSliders(mask.params);
   const lumLow = mask.lumLow ?? 0;
   const lumHigh = mask.lumHigh ?? 1;
   const hasLumGate = isLumGateActive(lumLow, lumHigh);
+
+  if (mask.kind === LocalMaskKind.Brush) {
+    // No buffer (decoder failed or not painted yet) → contribute nothing.
+    if (!decodedBrushBuffer) {
+      return { sliders, weight: () => 0, hasLumGate, lumLow, lumHigh };
+    }
+    const buffer = decodedBrushBuffer;
+    const mw = BRUSH_MASK_RESOLUTION;
+    const mh = BRUSH_MASK_RESOLUTION;
+    // Map image-space pixel coords → normalized [0,1] → bilinear sample of
+    // the brush canvas. The brush canvas is square but stretches to fit the
+    // image's aspect ratio; this matches what the user painted on top of the
+    // (already aspect-correct) preview.
+    const invW = 1 / Math.max(1, width);
+    const invH = 1 / Math.max(1, height);
+    return {
+      sliders,
+      hasLumGate,
+      lumLow,
+      lumHigh,
+      weight: (x, y) => bilinearSampleBrush(buffer, mw, mh, x * invW, y * invH),
+    };
+  }
 
   if (mask.kind === LocalMaskKind.Linear) {
     const ax = mask.ax * width;
@@ -348,8 +432,16 @@ const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters)
   }
 
   const globalSliders = precomputeSliders(params);
-  const masks = (params.masks ?? [])
-    .map((m) => precomputeMask(m, width, height))
+  // Decode any brush masks once up-front (PNG decode is async). Linear and
+  // radial masks need no async work; we still parallelize for symmetry. Map
+  // preserves the original mask order so the layered-stacking semantics are
+  // unchanged.
+  const rawMasks = params.masks ?? [];
+  const decodedBrushBuffers = await Promise.all(
+    rawMasks.map((m) => (m.kind === LocalMaskKind.Brush ? decodeBrushMask(m.mask) : Promise.resolve(null))),
+  );
+  const masks = rawMasks
+    .map((m, i) => precomputeMask(m, width, height, decodedBrushBuffers[i]))
     .filter((m) => m.sliders.active);
 
   if (!globalSliders.active && masks.length === 0) {
@@ -569,8 +661,9 @@ export class MediaRepository {
         }
 
         // Rotate and extract inscribed rectangle
-        pipeline = sharp(data, { raw: { width: W, height: H, channels: info.channels } })
-          .rotate(freeAngle, { background: { r: 0, g: 0, b: 0 } });
+        pipeline = sharp(data, { raw: { width: W, height: H, channels: info.channels } }).rotate(freeAngle, {
+          background: { r: 0, g: 0, b: 0 },
+        });
 
         // Get actual rotated dimensions and extract centered inscribed rect
         const rotated = await pipeline.raw().toBuffer({ resolveWithObject: true });
@@ -582,8 +675,12 @@ export class MediaRepository {
         const left = Math.max(0, Math.round((rW - extractW) / 2));
         const top = Math.max(0, Math.round((rH - extractH) / 2));
 
-        pipeline = sharp(rotated.data, { raw: { width: rW, height: rH, channels: rotated.info.channels } })
-          .extract({ left, top, width: extractW, height: extractH });
+        pipeline = sharp(rotated.data, { raw: { width: rW, height: rH, channels: rotated.info.channels } }).extract({
+          left,
+          top,
+          width: extractW,
+          height: extractH,
+        });
       }
     }
 

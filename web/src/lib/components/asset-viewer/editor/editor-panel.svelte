@@ -8,6 +8,7 @@
   import { getAssetEdits, type AssetResponseDto } from '@immich/sdk';
   import { Button, HStack, Icon, IconButton, toastManager } from '@immich/ui';
   import {
+    mdiBrush,
     mdiClose,
     mdiContentCopy,
     mdiCrop,
@@ -75,8 +76,10 @@
     toastManager.primary('Adjustments copied — multi-select photos to paste them.');
   }
 
-  const maskLabel = (mask: { kind: 'linear' | 'radial' }, i: number): string =>
-    `${mask.kind === 'linear' ? 'Linear' : 'Radial'} mask ${i + 1}`;
+  const maskLabel = (mask: { kind: 'linear' | 'radial' | 'brush' }, i: number): string => {
+    const kindLabel = mask.kind === 'linear' ? 'Linear' : mask.kind === 'radial' ? 'Radial' : 'Brush';
+    return `${kindLabel} mask ${i + 1}`;
+  };
 
   async function closeEditor() {
     if (await editManager.closeConfirm()) {
@@ -210,7 +213,9 @@
            toggles the overlay back off. -->
       <button
         type="button"
-        class="rounded-full p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors {editManager.showOriginal ? 'bg-gray-300 dark:bg-gray-600' : ''}"
+        class="rounded-full p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors {editManager.showOriginal
+          ? 'bg-gray-300 dark:bg-gray-600'
+          : ''}"
         aria-label="Hold to see saved version"
         title="Hold to compare against saved version"
         onpointerdown={(e) => {
@@ -250,7 +255,8 @@
         onclick={copyAdjustments}
         disabled={adjustManager.edits.length === 0}
       />
-      <Button shape="round" size="small" onclick={applyEdits} loading={editManager.isApplyingEdits}>{$t('save')}</Button>
+      <Button shape="round" size="small" onclick={applyEdits} loading={editManager.isApplyingEdits}>{$t('save')}</Button
+      >
     </HStack>
   </HStack>
 
@@ -291,9 +297,7 @@
         <button
           class="py-1 text-xs rounded-md transition-colors text-center
             {ratio.isFree ? 'min-w-[4.5rem]' : 'px-2'}
-            {ratioSelected(ratio)
-            ? 'bg-immich-primary text-black'
-            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
+            {ratioSelected(ratio) ? 'bg-immich-primary text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
           onclick={() => selectAspectRatioAndCrop(ratio)}
           aria-label={ratio.label}
         >
@@ -302,9 +306,7 @@
       {/each}
       <button
         class="row-span-2 px-2 py-1 text-xs rounded-md transition-colors text-center aspect-square
-          {ratioSelected(squareRatio)
-          ? 'bg-immich-primary text-black'
-          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
+          {ratioSelected(squareRatio) ? 'bg-immich-primary text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
         onclick={() => selectAspectRatioAndCrop(squareRatio)}
         aria-label={squareRatio.label}
       >
@@ -314,9 +316,7 @@
         <button
           class="py-1 text-xs rounded-md transition-colors text-center
             {ratio.value === 'original' ? 'min-w-[4.5rem]' : 'px-2'}
-            {ratioSelected(ratio)
-            ? 'bg-immich-primary text-black'
-            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
+            {ratioSelected(ratio) ? 'bg-immich-primary text-black' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
           onclick={() => selectAspectRatioAndCrop(ratio)}
           aria-label={ratio.label}
         >
@@ -335,7 +335,9 @@
         <button
           type="button"
           class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
-            {adjustManager.pendingMaskKind === 'linear' ? 'bg-immich-primary text-black' : 'text-gray-300 hover:text-white'}"
+            {adjustManager.pendingMaskKind === 'linear'
+            ? 'bg-immich-primary text-black'
+            : 'text-gray-300 hover:text-white'}"
           onclick={() => {
             if (adjustManager.pendingMaskKind === 'linear') {
               adjustManager.cancelDrawingMask();
@@ -354,7 +356,9 @@
         <button
           type="button"
           class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
-            {adjustManager.pendingMaskKind === 'radial' ? 'bg-immich-primary text-black' : 'text-gray-300 hover:text-white'}"
+            {adjustManager.pendingMaskKind === 'radial'
+            ? 'bg-immich-primary text-black'
+            : 'text-gray-300 hover:text-white'}"
           onclick={() => {
             if (adjustManager.pendingMaskKind === 'radial') {
               adjustManager.cancelDrawingMask();
@@ -370,6 +374,27 @@
           <Icon icon={mdiCircleOutline} size="14" />
           <span>Radial</span>
         </button>
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
+            {adjustManager.pendingMaskKind === 'brush'
+            ? 'bg-immich-primary text-black'
+            : 'text-gray-300 hover:text-white'}"
+          onclick={() => {
+            if (adjustManager.pendingMaskKind === 'brush') {
+              adjustManager.cancelDrawingMask();
+            } else {
+              exitCropMode();
+              adjustManager.startDrawingMask('brush');
+            }
+          }}
+          disabled={adjustManager.masks.length >= 8}
+          aria-label="Paint a freehand brush mask"
+          title="Paint over the part of the photo you want to adjust"
+        >
+          <Icon icon={mdiBrush} size="14" />
+          <span>Brush</span>
+        </button>
       </div>
     </div>
 
@@ -380,8 +405,8 @@
             type="button"
             class="flex w-full items-center justify-between rounded px-2 py-1 text-xs
               {adjustManager.selectedMaskIndex === null
-                ? 'bg-immich-primary text-black'
-                : 'text-gray-300 hover:bg-gray-700'}"
+              ? 'bg-immich-primary text-black'
+              : 'text-gray-300 hover:bg-gray-700'}"
             onclick={() => adjustManager.selectMask(null)}
           >
             <span>Global</span>
@@ -393,8 +418,8 @@
               type="button"
               class="flex flex-1 items-center justify-between rounded px-2 py-1 text-xs
                 {adjustManager.selectedMaskIndex === i
-                  ? 'bg-immich-primary text-black'
-                  : 'text-gray-300 hover:bg-gray-700'}"
+                ? 'bg-immich-primary text-black'
+                : 'text-gray-300 hover:bg-gray-700'}"
               onclick={() => {
                 exitCropMode();
                 adjustManager.selectMask(i);
@@ -423,7 +448,9 @@
                   {mask.invert ? 'text-immich-primary' : 'text-gray-300 hover:text-white'}"
                 onclick={() => adjustManager.updateMask(i, { ...mask, invert: !mask.invert })}
                 aria-label={`Invert ${maskLabel(mask, i)}`}
-                title={mask.invert ? 'Invert: applies outside (click to flip)' : 'Invert: applies inside (click to flip)'}
+                title={mask.invert
+                  ? 'Invert: applies outside (click to flip)'
+                  : 'Invert: applies inside (click to flip)'}
               >
                 <Icon icon={mdiInvertColors} size="14" />
               </button>
