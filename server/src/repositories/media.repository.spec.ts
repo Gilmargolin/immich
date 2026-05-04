@@ -763,6 +763,73 @@ describe(MediaRepository.name, () => {
       expect(avg.r).toBeCloseTo(128, -1);
     });
 
+    it('should apply a brush mask: painted pixel sees adjustment, unpainted does not', async () => {
+      // Build a small synthetic brush PNG: 4×4 greyscale, white in the
+      // bottom-right 2×2 quadrant, black elsewhere. Sharp resizes it to
+      // BRUSH_MASK_RESOLUTION on decode; bilinear sampling preserves the
+      // four-quadrant structure across the 100×100 image.
+      const brushPng = await sharp(Uint8Array.from([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 0, 0, 255, 255]), {
+        raw: { width: 4, height: 4, channels: 1 },
+      })
+        .png()
+        .toBuffer();
+      const brushBase64 = brushPng.toString('base64');
+
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Brush,
+                mask: brushBase64,
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      // Top-left of the image (10, 10) maps to UV (0.10, 0.10) → mask cell
+      // (0.30, 0.30) → black quadrant → unpainted.
+      const unpainted = await getPixelColor(buffer, 10, 10);
+      // Bottom-right of the image (95, 95) maps to UV (0.95, 0.95) → mask cell
+      // (2.85, 2.85) → white quadrant → fully painted.
+      const painted = await getPixelColor(buffer, 95, 95);
+      expect(unpainted.r).toBeGreaterThan(170);
+      // brightness=-1 with weight=1 cuts linear-light by 4× → byte 180 lands
+      // around 95 after sRGB round-trip (matches the linear/radial brightness
+      // tests above for an in-effect pixel).
+      expect(painted.r).toBeLessThan(120);
+    });
+
+    it('should ignore a brush mask whose payload fails to decode', async () => {
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Brush,
+                mask: 'not-a-valid-png-base64',
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      const avg = await getAverageColor(buffer);
+      // Decode fails → mask treated as fully transparent → image unchanged.
+      expect(avg.r).toBeCloseTo(180, -1);
+    });
+
     it('should support inverted radial masks (effect outside the ellipse)', async () => {
       const imageBuffer = await buildGrayImage(180);
       const result = await sut['applyEdits'](sharp(imageBuffer), [

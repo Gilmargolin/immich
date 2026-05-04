@@ -17,7 +17,7 @@
 // All math runs in linear-light. sRGB inputs are converted with the standard
 // piecewise transfer function, and outputs converted back the same way.
 
-import type { AdjustmentSliders, LocalMask } from './adjust-webgl';
+import { BRUSH_MASK_RESOLUTION, type AdjustmentSliders, type LocalMask } from './adjust-webgl';
 
 const SRGB_TO_LINEAR_LUT = ((): Float32Array => {
   const lut = new Float32Array(256);
@@ -121,8 +121,63 @@ export const applySliders = (rgb: RgbLinear, s: AdjustmentSliders): RgbLinear =>
   return { r, g, b };
 };
 
+// Bilinear sample of a single-channel brush-mask buffer at fractional pixel
+// coordinates. Mirrors the same name in `media.repository.ts`. The buffer is
+// `mw × mh` bytes, result normalized to [0, 1]. UVs are clamped to the edge,
+// matching the WebGL `CLAMP_TO_EDGE` wrap mode used by the renderer.
+export const bilinearSampleBrush = (
+  buffer: Uint8Array | Uint8ClampedArray,
+  mw: number,
+  mh: number,
+  u: number,
+  v: number,
+): number => {
+  const cu = Math.min(1, Math.max(0, u));
+  const cv = Math.min(1, Math.max(0, v));
+  const fx = cu * (mw - 1);
+  const fy = cv * (mh - 1);
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = Math.min(mw - 1, x0 + 1);
+  const y1 = Math.min(mh - 1, y0 + 1);
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const a = buffer[y0 * mw + x0] * (1 - tx) + buffer[y0 * mw + x1] * tx;
+  const b = buffer[y1 * mw + x0] * (1 - tx) + buffer[y1 * mw + x1] * tx;
+  return (a * (1 - ty) + b * ty) / 255;
+};
+
+// Per-mask context for brush masks. Linear and radial masks need only the
+// DTO; brush masks need the decoded greyscale buffer alongside. PNG decoding
+// is browser-side async work — callers pre-decode and pass the buffers in
+// (one per mask, indexed parallel to `masks`).
+export type BrushMaskBuffer = {
+  buffer: Uint8Array | Uint8ClampedArray;
+  width: number;
+  height: number;
+};
+
 // Per-pixel mask weight in [0, 1]. px is in pixel space.
-export const maskWeight = (mask: LocalMask, px: number, py: number, width: number, height: number): number => {
+export const maskWeight = (
+  mask: LocalMask,
+  px: number,
+  py: number,
+  width: number,
+  height: number,
+  brushBuffer?: BrushMaskBuffer | null,
+): number => {
+  if (mask.kind === 'brush') {
+    if (!brushBuffer) {
+      return 0;
+    }
+    return bilinearSampleBrush(
+      brushBuffer.buffer,
+      brushBuffer.width,
+      brushBuffer.height,
+      px / Math.max(1, width),
+      py / Math.max(1, height),
+    );
+  }
   if (mask.kind === 'linear') {
     const ax = mask.ax * width;
     const ay = mask.ay * height;
@@ -172,6 +227,12 @@ export const maskWeight = (mask: LocalMask, px: number, py: number, width: numbe
 // Apply global sliders + masks to a single sRGB byte triple. Returns an sRGB
 // byte triple. Mirrors the inner pixel loop in
 // server/src/repositories/media.repository.ts → applyAdjustments.
+//
+// `brushBuffers` is parallel to `masks`; each entry is the decoded greyscale
+// buffer for the corresponding mask if it is a brush mask, otherwise null /
+// undefined. Linear and radial masks ignore the brush-buffer argument. If
+// not provided at all, brush masks contribute nothing (treated as fully
+// transparent).
 export const applyAdjustToPixel = (
   rByte: number,
   gByte: number,
@@ -182,6 +243,7 @@ export const applyAdjustToPixel = (
   py: number,
   width: number,
   height: number,
+  brushBuffers?: (BrushMaskBuffer | null | undefined)[],
 ): { r: number; g: number; b: number } => {
   let rgb: RgbLinear = {
     r: SRGB_TO_LINEAR_LUT[rByte],
@@ -191,8 +253,9 @@ export const applyAdjustToPixel = (
 
   rgb = applySliders(rgb, globals);
 
-  for (const mask of masks) {
-    const w = maskWeight(mask, px, py, width, height);
+  for (let i = 0; i < masks.length; i++) {
+    const mask = masks[i];
+    const w = maskWeight(mask, px, py, width, height, brushBuffers?.[i]);
     if (w > 0) {
       const masked = applySliders(rgb, mask.params);
       rgb = {
@@ -209,3 +272,11 @@ export const applyAdjustToPixel = (
     b: linearToSrgb8(rgb.b),
   };
 };
+
+// Build a default empty brush mask buffer (BRUSH_MASK_RESOLUTION² zeroes).
+// Used as the initial backing store when the user enters paint mode.
+export const emptyBrushMaskBuffer = (): BrushMaskBuffer => ({
+  buffer: new Uint8ClampedArray(BRUSH_MASK_RESOLUTION * BRUSH_MASK_RESOLUTION),
+  width: BRUSH_MASK_RESOLUTION,
+  height: BRUSH_MASK_RESOLUTION,
+});

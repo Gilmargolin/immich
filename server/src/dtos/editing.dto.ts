@@ -9,8 +9,11 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { IsAxisAlignedRotation, IsUniqueEditActions, ValidateEnum, ValidateUUID } from 'src/validation';
@@ -122,7 +125,19 @@ export class AdjustmentSliders {
 export enum LocalMaskKind {
   Linear = 'linear',
   Radial = 'radial',
+  Brush = 'brush',
 }
+
+// Hard cap on the brush mask payload. A 512×512 grayscale PNG with deflate
+// typically lands in 30–80 KB; the 300 KB cap leaves comfortable headroom for
+// noisy brush patterns that compress poorly while still keeping a single
+// adjust action well under typical DB row size budgets even with the
+// MAX_MASKS=8 limit (worst case: ~2.4 MB of brush data per asset).
+export const BRUSH_MASK_MAX_BYTES = 300_000;
+// Fixed canvas resolution for the brush mask, in pixels. Must match the
+// resolution the web overlay rasterizes to (see brush-overlay.svelte) and the
+// resolution the server decodes to (see precomputeMask in media.repository.ts).
+export const BRUSH_MASK_RESOLUTION = 512;
 
 // Linear gradient mask. Point A = weight 1, Point B = weight 0; smooth falloff
 // in between. Coordinates are normalized to the post-crop output: x divided by
@@ -132,13 +147,25 @@ export class LinearMask {
   @ApiProperty({ enum: LocalMaskKind, enumName: 'LocalMaskKind', description: 'Mask kind discriminator' })
   kind!: LocalMaskKind.Linear;
 
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized x of point A (weight=1)' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Normalized x of point A (weight=1)' })
   ax!: number;
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized y of point A (weight=1)' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Normalized y of point A (weight=1)' })
   ay!: number;
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized x of point B (weight=0)' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Normalized x of point B (weight=0)' })
   bx!: number;
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized y of point B (weight=0)' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Normalized y of point B (weight=0)' })
   by!: number;
 
   @IsOptional()
@@ -166,15 +193,30 @@ export class RadialMask {
   @ApiProperty({ enum: LocalMaskKind, enumName: 'LocalMaskKind', description: 'Mask kind discriminator' })
   kind!: LocalMaskKind.Radial;
 
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized x of ellipse center' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Normalized x of ellipse center' })
   cx!: number;
-  @IsNumber() @Min(0) @Max(1) @ApiProperty({ description: 'Normalized y of ellipse center' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Normalized y of ellipse center' })
   cy!: number;
-  @IsNumber() @Min(0) @Max(2) @ApiProperty({ description: 'Normalized x-semi-axis (to min(W,H))' })
+  @IsNumber()
+  @Min(0)
+  @Max(2)
+  @ApiProperty({ description: 'Normalized x-semi-axis (to min(W,H))' })
   rx!: number;
-  @IsNumber() @Min(0) @Max(2) @ApiProperty({ description: 'Normalized y-semi-axis (to min(W,H))' })
+  @IsNumber()
+  @Min(0)
+  @Max(2)
+  @ApiProperty({ description: 'Normalized y-semi-axis (to min(W,H))' })
   ry!: number;
-  @IsNumber() @Min(-360) @Max(360) @ApiProperty({ description: 'Ellipse rotation in degrees' })
+  @IsNumber()
+  @Min(-360)
+  @Max(360)
+  @ApiProperty({ description: 'Ellipse rotation in degrees' })
   angle!: number;
   @IsNumber()
   @Min(0)
@@ -210,9 +252,43 @@ export class RadialMask {
   params!: AdjustmentSliders;
 }
 
-export type LocalMask = LinearMask | RadialMask;
+// Freehand brush mask. The user paints directly onto the photo; the painted
+// region (and only that region) gets `params` applied.
+//
+// Storage format: a base64-encoded grayscale PNG of fixed resolution
+// (BRUSH_MASK_RESOLUTION × BRUSH_MASK_RESOLUTION). The string field carries
+// either a raw base64 payload OR a `data:image/png;base64,...` data URL —
+// the server strips the prefix when decoding. Pixel value 255 = fully painted
+// (weight 1.0); 0 = unpainted (weight 0.0); intermediate bytes give soft
+// edges. The mask is sampled bilinearly in image-space coordinates, so it
+// always covers the whole image regardless of the image's aspect ratio
+// (square mask stretched to fit) — no extra geometry fields are needed.
+export class BrushMask {
+  @IsEnum(LocalMaskKind)
+  @ApiProperty({ enum: LocalMaskKind, enumName: 'LocalMaskKind', description: 'Mask kind discriminator' })
+  kind!: LocalMaskKind.Brush;
 
-@ApiExtraModels(LinearMask, RadialMask)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(BRUSH_MASK_MAX_BYTES)
+  @ApiProperty({
+    description:
+      'Base64-encoded grayscale PNG of the painted alpha mask. ' +
+      'Either a raw base64 string or a `data:image/png;base64,...` data URL is accepted. ' +
+      `Resolution is fixed at ${BRUSH_MASK_RESOLUTION}×${BRUSH_MASK_RESOLUTION} ` +
+      `and the encoded payload must be ≤ ${BRUSH_MASK_MAX_BYTES} characters.`,
+  })
+  mask!: string;
+
+  @ValidateNested()
+  @Type(() => AdjustmentSliders)
+  @ApiProperty({ description: 'Adjustments to apply where this mask has weight > 0' })
+  params!: AdjustmentSliders;
+}
+
+export type LocalMask = LinearMask | RadialMask | BrushMask;
+
+@ApiExtraModels(LinearMask, RadialMask, BrushMask)
 export class AdjustParameters extends AdjustmentSliders {
   @IsOptional()
   @IsArray()
@@ -224,6 +300,7 @@ export class AdjustParameters extends AdjustmentSliders {
       subTypes: [
         { value: LinearMask, name: LocalMaskKind.Linear },
         { value: RadialMask, name: LocalMaskKind.Radial },
+        { value: BrushMask, name: LocalMaskKind.Brush },
       ],
     },
     keepDiscriminatorProperty: true,
@@ -231,7 +308,7 @@ export class AdjustParameters extends AdjustmentSliders {
   @ApiProperty({
     description: 'Optional local-adjustment masks (up to 8). Stack in order; later masks layer on top.',
     isArray: true,
-    anyOf: [LinearMask, RadialMask].map((type) => ({ $ref: getSchemaPath(type) })),
+    anyOf: [LinearMask, RadialMask, BrushMask].map((type) => ({ $ref: getSchemaPath(type) })),
   })
   masks?: LocalMask[];
 }

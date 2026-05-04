@@ -22,15 +22,22 @@ void main() {
 // arrays (which work but are awkward to set from JS via uniformXX calls).
 //
 // For each mask slot i in [0, MAX_MASKS):
-//   u_maskKind[i]        : 0 = linear, 1 = radial (only matters for i < u_maskCount)
+//   u_maskKind[i]        : 0 = linear, 1 = radial, 2 = brush
+//                          (only matters for i < u_maskCount)
 //   u_maskGeomA[i]       : linear → (ax, ay, bx, by) all normalized [0,1]
 //                          radial → (cx, cy, rx, ry); cx/cy normalized to W/H,
 //                                    rx/ry normalized to min(W, H)
+//                          brush  → unused
 //   u_maskGeomB[i]       : linear → (mid, _, _, _)
 //                          radial → (angleDeg, feather, invert?1:0, mid)
+//                          brush  → unused
 //   u_maskSliders0[i]    : (brightness, contrast, saturation, warmth)
 //   u_maskSliders1[i]    : (tint, highlights, shadows, whitePoint)
 //   u_maskBlackPoint[i]  : blackPoint
+//   u_brushMask[i]       : sampler2D bound to texture unit BRUSH_TEX_UNIT_BASE + i
+//                          Sampled with normalized UV in [0, 1]; LINEAR
+//                          filtering + CLAMP_TO_EDGE wrap. Only the red
+//                          channel is used (greyscale upload).
 export const FRAGMENT_SHADER = /* glsl */ `#version 300 es
 precision highp float;
 
@@ -64,6 +71,17 @@ uniform vec4 u_maskGeomB[MAX_MASKS];
 uniform vec4 u_maskSliders0[MAX_MASKS];
 uniform vec4 u_maskSliders1[MAX_MASKS];
 uniform float u_maskBlackPoint[MAX_MASKS];
+// One brush-mask sampler per slot. Slots whose kind is not 2 (brush) still
+// have a 1×1 zeroed texture bound so the sampler is valid; the maskWeight
+// branch only reads from these for kind==2 slots.
+uniform sampler2D u_brushMask0;
+uniform sampler2D u_brushMask1;
+uniform sampler2D u_brushMask2;
+uniform sampler2D u_brushMask3;
+uniform sampler2D u_brushMask4;
+uniform sampler2D u_brushMask5;
+uniform sampler2D u_brushMask6;
+uniform sampler2D u_brushMask7;
 
 float smoothStepF(float edge0, float edge1, float x) {
   float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
@@ -140,9 +158,29 @@ vec3 applySliders(
   return rgb;
 }
 
+// Sample the brush-mask texture for slot idx at normalized UV. GLSL ES 3.00
+// disallows indexing a sampler array by a non-constant; an explicit if-chain
+// is the standard workaround. Only the red channel (greyscale upload).
+float sampleBrushMask(int idx, vec2 uv) {
+  if (idx == 0) return texture(u_brushMask0, uv).r;
+  if (idx == 1) return texture(u_brushMask1, uv).r;
+  if (idx == 2) return texture(u_brushMask2, uv).r;
+  if (idx == 3) return texture(u_brushMask3, uv).r;
+  if (idx == 4) return texture(u_brushMask4, uv).r;
+  if (idx == 5) return texture(u_brushMask5, uv).r;
+  if (idx == 6) return texture(u_brushMask6, uv).r;
+  return texture(u_brushMask7, uv).r;
+}
+
 // Per-pixel mask weight in [0, 1]. Mirrors precomputeMask in
 // media.repository.ts. px is in pixel space.
 float maskWeight(int idx, vec2 px) {
+  if (u_maskKind[idx] == 2) {
+    // Brush mask: sample the bound texture by image-space UV. CLAMP_TO_EDGE
+    // wrap + LINEAR filter on the texture handle the bilinear interpolation
+    // the math reference uses explicitly.
+    return sampleBrushMask(idx, px / u_imageSize);
+  }
   if (u_maskKind[idx] == 0) {
     vec2 a = u_maskGeomA[idx].xy * u_imageSize;
     vec2 b = u_maskGeomA[idx].zw * u_imageSize;

@@ -1,5 +1,5 @@
+import { BRUSH_MASK_RESOLUTION, type LocalMask } from '$lib/managers/edit/adjust-webgl';
 import type { EditAction, EditActions, EditToolManager } from '$lib/managers/edit/edit-manager.svelte';
-import type { LocalMask } from '$lib/managers/edit/adjust-webgl';
 import type { AssetResponseDto } from '@immich/sdk';
 
 export interface AdjustmentValues {
@@ -63,6 +63,31 @@ const defaultRadialMask = (): LocalMask => ({
   params: { ...defaultValues },
 });
 
+// An empty (fully unpainted) brush mask: BRUSH_MASK_RESOLUTION² transparent
+// pixels, encoded as a PNG data URL. We render once via a transient canvas
+// to keep the rasterized format identical to what the brush overlay produces
+// later (so committed-then-edited state stays byte-identical).
+//
+// Browsers always have `document` available (this manager is mounted from
+// editor-panel.svelte, which is web-only). The fallback never runs in
+// practice but lets the manager be imported in test environments without
+// crashing on module load.
+const emptyBrushMaskDataUrl = (): string => {
+  if (typeof document === 'undefined') {
+    return '';
+  }
+  const c = document.createElement('canvas');
+  c.width = BRUSH_MASK_RESOLUTION;
+  c.height = BRUSH_MASK_RESOLUTION;
+  return c.toDataURL('image/png');
+};
+
+export const defaultBrushMask = (): LocalMask => ({
+  kind: 'brush',
+  mask: emptyBrushMaskDataUrl(),
+  params: { ...defaultValues },
+});
+
 export class AdjustManager implements EditToolManager {
   values = $state<AdjustmentValues>({ ...defaultValues });
   masks = $state<LocalMask[]>([]);
@@ -74,7 +99,7 @@ export class AdjustManager implements EditToolManager {
   editingMaskIndex = $state<number | null>(null);
   // When set, the next click-drag on the photo creates a mask of this kind
   // (Lightroom-style draw flow). null = drawing inactive.
-  pendingMaskKind = $state<'linear' | 'radial' | null>(null);
+  pendingMaskKind = $state<'linear' | 'radial' | 'brush' | null>(null);
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
   private initialMasks = $state<LocalMask[]>([]);
 
@@ -159,8 +184,12 @@ export class AdjustManager implements EditToolManager {
     }
 
     // Per-channel offsets for warmth and tint
-    let rSlope = slope, gSlope = slope, bSlope = slope;
-    let rIntercept = intercept, gIntercept = intercept, bIntercept = intercept;
+    let rSlope = slope,
+      gSlope = slope,
+      bSlope = slope;
+    let rIntercept = intercept,
+      gIntercept = intercept,
+      bIntercept = intercept;
 
     // Warmth: shift red up, blue down
     if (this.values.warmth !== 0) {
@@ -253,7 +282,7 @@ export class AdjustManager implements EditToolManager {
   // Lightroom-style draw flow: arm draw mode and let the overlay component
   // listen for pointer events on the photo. The mask is materialized on
   // pointerup with the user-drawn geometry, not on this call.
-  startDrawingMask(kind: 'linear' | 'radial'): void {
+  startDrawingMask(kind: 'linear' | 'radial' | 'brush'): void {
     if (this.masks.length >= 8) {
       return;
     }
@@ -277,6 +306,26 @@ export class AdjustManager implements EditToolManager {
       bx,
       by,
       mid: 0.5,
+      params: { ...defaultValues },
+    };
+    this.masks = [...this.masks, mask];
+    const idx = this.masks.length - 1;
+    this.selectedMaskIndex = idx;
+    this.editingMaskIndex = idx;
+    this.pendingMaskKind = null;
+  }
+
+  // Called when the user clicks the Brush button. The brush mask is
+  // committed immediately as an empty (transparent) 512×512 PNG; the brush
+  // overlay then renders for that mask and accepts paint strokes that update
+  // the mask in place via `updateMask`.
+  commitDrawnBrushMask(maskBase64: string): void {
+    if (this.pendingMaskKind !== 'brush') {
+      return;
+    }
+    const mask: LocalMask = {
+      kind: 'brush',
+      mask: maskBase64,
       params: { ...defaultValues },
     };
     this.masks = [...this.masks, mask];

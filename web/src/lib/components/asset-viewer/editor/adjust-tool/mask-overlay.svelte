@@ -2,6 +2,7 @@
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import type { LinearMask, LocalMask, RadialMask } from '$lib/managers/edit/adjust-webgl';
   import { onDestroy } from 'svelte';
+  import BrushOverlay from './brush-overlay.svelte';
 
   // Interactive SVG overlay over the adjust canvas. Three modes:
   //   - Idle: render mask gizmos for existing masks. Selected mask gets full
@@ -241,8 +242,7 @@
     // y of main top in SVG coords:
     const mainTopY = cyPx - ryPx;
     // y of the (log-mapped) feather knob:
-    const featherKnobY =
-      cyPx - ryPx * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET);
+    const featherKnobY = cyPx - ryPx * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET);
     const span = mainTopY - featherKnobY; // > 0 for any feather > 0
     if (span < 1) {
       return; // no visible band — feather is 0; mid has no effect
@@ -292,6 +292,11 @@
 
   const onDrawPointerDown = (e: PointerEvent) => {
     if (!pendingKind) {
+      return;
+    }
+    // Brush draw events are owned by the BrushOverlay sibling — the SVG
+    // doesn't intercept clicks in that mode.
+    if (pendingKind === 'brush') {
       return;
     }
     e.preventDefault();
@@ -482,423 +487,457 @@
   });
 </script>
 
-<svg
-  bind:this={svg}
-  class="absolute inset-0 h-full w-full"
-  style="cursor: {pendingKind ? 'crosshair' : 'default'}; touch-action: none;"
-  onclick={onSvgClick}
-  onpointerdown={onDrawPointerDown}
-  role="presentation"
->
-  <!--
+<div class="pointer-events-none absolute inset-0">
+  <svg
+    bind:this={svg}
+    class="absolute inset-0 h-full w-full pointer-events-auto"
+    style="cursor: {pendingKind && pendingKind !== 'brush' ? 'crosshair' : 'default'}; touch-action: none;"
+    onclick={onSvgClick}
+    onpointerdown={onDrawPointerDown}
+    role="presentation"
+  >
+    <!--
     Per-mask gradient defs for the affected-area overlay. Only rendered when
     the user is actively editing that mask's geometry (clicked the pencil)
     so a freshly-committed mask doesn't keep a red tint forever.
   -->
-  <defs>
-    {#each masks as mask, i (i)}
-      {#if i === editingIndex}
-        {#if mask.kind === 'linear'}
-          {@const lp = linearPx(mask)}
-          {@const linMid = Math.max(0.05, Math.min(0.95, mask.mid ?? 0.5))}
-          <linearGradient
-            id="mask-overlay-grad-{i}"
-            x1={lp.ax}
-            y1={lp.ay}
-            x2={lp.bx}
-            y2={lp.by}
-            gradientUnits="userSpaceOnUse"
-          >
-            <!-- Stops match the shader's piecewise mid remap: weight = 1 at
+    <defs>
+      {#each masks as mask, i (i)}
+        {#if i === editingIndex}
+          {#if mask.kind === 'linear'}
+            {@const lp = linearPx(mask)}
+            {@const linMid = Math.max(0.05, Math.min(0.95, mask.mid ?? 0.5))}
+            <linearGradient
+              id="mask-overlay-grad-{i}"
+              x1={lp.ax}
+              y1={lp.ay}
+              x2={lp.bx}
+              y2={lp.by}
+              gradientUnits="userSpaceOnUse"
+            >
+              <!-- Stops match the shader's piecewise mid remap: weight = 1 at
                  offset 0, weight = 0.5 at offset = mid, weight = 0 at offset 1.
                  Without the mid stop the red tint stays a pure linear ramp
                  even when the falloff curve is biased, which makes the visual
                  lie about where the effect actually peaks. -->
-            <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
-            <stop offset={linMid} stop-color="#ef4444" stop-opacity="0.15" />
-            <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
-          </linearGradient>
+              <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
+              <stop offset={linMid} stop-color="#ef4444" stop-opacity="0.15" />
+              <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
+            </linearGradient>
+          {:else}
+            {@const featherEnd = 1 + mask.feather}
+            {@const radMid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
+            {@const innerOffset = 1 / featherEnd}
+            {@const midOffset = innerOffset + radMid * (1 - innerOffset)}
+            <radialGradient
+              id="mask-overlay-grad-{i}"
+              cx={mask.cx * svgWidth}
+              cy={mask.cy * svgHeight}
+              r={Math.max(mask.rx, mask.ry) * minDim * featherEnd}
+              fx={mask.cx * svgWidth}
+              fy={mask.cy * svgHeight}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
+              <stop offset={innerOffset} stop-color="#ef4444" stop-opacity="0.3" />
+              <stop offset={midOffset} stop-color="#ef4444" stop-opacity="0.15" />
+              <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
+            </radialGradient>
+          {/if}
+        {/if}
+      {/each}
+    </defs>
+
+    <!-- Affected-area overlay (editing mask only) — non-interactive tint. -->
+    {#each masks as mask, i (i)}
+      {#if i === editingIndex}
+        {#if mask.kind === 'linear'}
+          <rect
+            x="0"
+            y="0"
+            width={svgWidth}
+            height={svgHeight}
+            fill="url(#mask-overlay-grad-{i})"
+            pointer-events="none"
+          />
         {:else}
+          {@const px = radialPx(mask)}
           {@const featherEnd = 1 + mask.feather}
-          {@const radMid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
-          {@const innerOffset = 1 / featherEnd}
-          {@const midOffset = innerOffset + radMid * (1 - innerOffset)}
-          <radialGradient
-            id="mask-overlay-grad-{i}"
-            cx={mask.cx * svgWidth}
-            cy={mask.cy * svgHeight}
-            r={Math.max(mask.rx, mask.ry) * minDim * featherEnd}
-            fx={mask.cx * svgWidth}
-            fy={mask.cy * svgHeight}
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0" stop-color="#ef4444" stop-opacity="0.3" />
-            <stop offset={innerOffset} stop-color="#ef4444" stop-opacity="0.3" />
-            <stop offset={midOffset} stop-color="#ef4444" stop-opacity="0.15" />
-            <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
-          </radialGradient>
+          <ellipse
+            cx={px.cx}
+            cy={px.cy}
+            rx={px.rx * featherEnd}
+            ry={px.ry * featherEnd}
+            fill="url(#mask-overlay-grad-{i})"
+            transform="rotate({mask.angle} {px.cx} {px.cy})"
+            pointer-events="none"
+          />
         {/if}
       {/if}
     {/each}
-  </defs>
 
-  <!-- Affected-area overlay (editing mask only) — non-interactive tint. -->
-  {#each masks as mask, i (i)}
-    {#if i === editingIndex}
-      {#if mask.kind === 'linear'}
-        <rect x="0" y="0" width={svgWidth} height={svgHeight} fill="url(#mask-overlay-grad-{i})" pointer-events="none" />
-      {:else}
-        {@const px = radialPx(mask)}
-        {@const featherEnd = 1 + mask.feather}
-        <ellipse
-          cx={px.cx}
-          cy={px.cy}
-          rx={px.rx * featherEnd}
-          ry={px.ry * featherEnd}
-          fill="url(#mask-overlay-grad-{i})"
-          transform="rotate({mask.angle} {px.cx} {px.cy})"
-          pointer-events="none"
-        />
-      {/if}
-    {/if}
-  {/each}
-
-  <!--
+    <!--
     Mask gizmos. Three tiers:
       - Editing (i === editingIndex): full handles, draggable, prominent.
       - Otherwise: nothing — committed masks are invisible until the user
         clicks the pencil to enter geometry-edit mode. Keeps the photo
         clean for slider-only workflows.
   -->
-  {#each masks as mask, i (i)}
-    {#if i === editingIndex}
-      {#if mask.kind === 'linear'}
-        {@const px = linearPx(mask)}
-        {@const guides = linearGuides(mask)}
-        <g>
-          {#if guides}
-            <!-- Three parallel perpendicular lines: full / mid / zero effect. -->
+    {#each masks as mask, i (i)}
+      {#if i === editingIndex}
+        {#if mask.kind === 'linear'}
+          {@const px = linearPx(mask)}
+          {@const guides = linearGuides(mask)}
+          <g>
+            {#if guides}
+              <!-- Three parallel perpendicular lines: full / mid / zero effect. -->
+              <line
+                x1={guides.full.x1}
+                y1={guides.full.y1}
+                x2={guides.full.x2}
+                y2={guides.full.y2}
+                stroke="white"
+                stroke-width="1.5"
+                pointer-events="none"
+              />
+              <!-- Mid line: invisible thick hit-area for dragging, then the visible dashed line. -->
+              <line
+                x1={guides.mid.x1}
+                y1={guides.mid.y1}
+                x2={guides.mid.x2}
+                y2={guides.mid.y2}
+                stroke="transparent"
+                stroke-width="14"
+                style="cursor: grab;"
+                onpointerdown={(e) => dragLinearMid(e, i, mask)}
+              />
+              <line
+                x1={guides.mid.x1}
+                y1={guides.mid.y1}
+                x2={guides.mid.x2}
+                y2={guides.mid.y2}
+                stroke="white"
+                stroke-opacity="0.7"
+                stroke-width="1"
+                stroke-dasharray="2 4"
+                pointer-events="none"
+              />
+              <line
+                x1={guides.zero.x1}
+                y1={guides.zero.y1}
+                x2={guides.zero.x2}
+                y2={guides.zero.y2}
+                stroke="white"
+                stroke-width="1.5"
+                pointer-events="none"
+              />
+              <text
+                x={guides.ax + guides.labelOffset.dx}
+                y={guides.ay + guides.labelOffset.dy}
+                fill="white"
+                font-size="11"
+                font-family="system-ui, sans-serif"
+                text-anchor="middle"
+                dominant-baseline="middle"
+                pointer-events="none"
+                style="paint-order: stroke; stroke: rgba(0,0,0,0.6); stroke-width: 3;"
+              >
+                100%
+              </text>
+              <text
+                x={guides.bx + guides.labelOffset.dx}
+                y={guides.by + guides.labelOffset.dy}
+                fill="white"
+                font-size="11"
+                font-family="system-ui, sans-serif"
+                text-anchor="middle"
+                dominant-baseline="middle"
+                pointer-events="none"
+                style="paint-order: stroke; stroke: rgba(0,0,0,0.6); stroke-width: 3;"
+              >
+                0%
+              </text>
+            {/if}
+            <!-- Connecting axis from A → B (gradient direction). -->
             <line
-              x1={guides.full.x1}
-              y1={guides.full.y1}
-              x2={guides.full.x2}
-              y2={guides.full.y2}
-              stroke="white"
-              stroke-width="1.5"
+              x1={px.ax}
+              y1={px.ay}
+              x2={px.bx}
+              y2={px.by}
+              stroke="#7dd3fc"
+              stroke-width="2"
+              stroke-dasharray="6 4"
               pointer-events="none"
             />
-            <!-- Mid line: invisible thick hit-area for dragging, then the visible dashed line. -->
-            <line
-              x1={guides.mid.x1}
-              y1={guides.mid.y1}
-              x2={guides.mid.x2}
-              y2={guides.mid.y2}
-              stroke="transparent"
-              stroke-width="14"
-              style="cursor: grab;"
-              onpointerdown={(e) => dragLinearMid(e, i, mask)}
-            />
-            <line
-              x1={guides.mid.x1}
-              y1={guides.mid.y1}
-              x2={guides.mid.x2}
-              y2={guides.mid.y2}
-              stroke="white"
-              stroke-opacity="0.7"
-              stroke-width="1"
-              stroke-dasharray="2 4"
-              pointer-events="none"
-            />
-            <line
-              x1={guides.zero.x1}
-              y1={guides.zero.y1}
-              x2={guides.zero.x2}
-              y2={guides.zero.y2}
-              stroke="white"
-              stroke-width="1.5"
-              pointer-events="none"
-            />
-            <text
-              x={guides.ax + guides.labelOffset.dx}
-              y={guides.ay + guides.labelOffset.dy}
-              fill="white"
-              font-size="11"
-              font-family="system-ui, sans-serif"
-              text-anchor="middle"
-              dominant-baseline="middle"
-              pointer-events="none"
-              style="paint-order: stroke; stroke: rgba(0,0,0,0.6); stroke-width: 3;"
-            >
-              100%
-            </text>
-            <text
-              x={guides.bx + guides.labelOffset.dx}
-              y={guides.by + guides.labelOffset.dy}
-              fill="white"
-              font-size="11"
-              font-family="system-ui, sans-serif"
-              text-anchor="middle"
-              dominant-baseline="middle"
-              pointer-events="none"
-              style="paint-order: stroke; stroke: rgba(0,0,0,0.6); stroke-width: 3;"
-            >
-              0%
-            </text>
-          {/if}
-          <!-- Connecting axis from A → B (gradient direction). -->
-          <line
-            x1={px.ax}
-            y1={px.ay}
-            x2={px.bx}
-            y2={px.by}
-            stroke="#7dd3fc"
-            stroke-width="2"
-            stroke-dasharray="6 4"
-            pointer-events="none"
-          />
-          {#if guides}
-            <!-- Translate handle: at the literal midpoint of AB. Rendered before
+            {#if guides}
+              <!-- Translate handle: at the literal midpoint of AB. Rendered before
                  the mid knob so when both happen to coincide, the knob wins. -->
-            <circle
-              cx={guides.transPx}
-              cy={guides.transPy}
-              r="6"
-              fill="#7dd3fc"
-              fill-opacity="0.5"
-              stroke="#0c4a6e"
-              stroke-width="1.5"
-              style="cursor: move;"
-              onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
-            />
-            <!-- Connector tick: short line from the AB axis to the offset knob,
+              <circle
+                cx={guides.transPx}
+                cy={guides.transPy}
+                r="6"
+                fill="#7dd3fc"
+                fill-opacity="0.5"
+                stroke="#0c4a6e"
+                stroke-width="1.5"
+                style="cursor: move;"
+                onpointerdown={(e) => dragLinearTranslate(e, i, mask)}
+              />
+              <!-- Connector tick: short line from the AB axis to the offset knob,
                  so the user reads the knob as belonging to the mid line. -->
-            <line
-              x1={guides.midPx}
-              y1={guides.midPy}
-              x2={guides.knobX}
-              y2={guides.knobY}
-              stroke="#facc15"
-              stroke-width="1.5"
-              pointer-events="none"
-            />
-            <!-- 50% drag knob: yellow diamond, offset perpendicular from the AB
+              <line
+                x1={guides.midPx}
+                y1={guides.midPy}
+                x2={guides.knobX}
+                y2={guides.knobY}
+                stroke="#facc15"
+                stroke-width="1.5"
+                pointer-events="none"
+              />
+              <!-- 50% drag knob: yellow diamond, offset perpendicular from the AB
                  axis so it's clearly distinct from the translate dot and is
                  always reachable regardless of mid value. -->
+              <rect
+                x={guides.knobX - 6}
+                y={guides.knobY - 6}
+                width="12"
+                height="12"
+                fill="#facc15"
+                stroke="#000"
+                stroke-width="1"
+                transform="rotate(45 {guides.knobX} {guides.knobY})"
+                style="cursor: grab;"
+                onpointerdown={(e) => dragLinearMid(e, i, mask)}
+              />
+            {/if}
+            <circle
+              cx={px.ax}
+              cy={px.ay}
+              r="9"
+              fill="#0ea5e9"
+              stroke="white"
+              stroke-width="2"
+              style="cursor: grab;"
+              onpointerdown={(e) => dragLinearA(e, i, mask)}
+            />
+            <circle
+              cx={px.bx}
+              cy={px.by}
+              r="9"
+              fill="white"
+              stroke="#0ea5e9"
+              stroke-width="2.5"
+              style="cursor: grab;"
+              onpointerdown={(e) => dragLinearB(e, i, mask)}
+            />
+          </g>
+        {:else}
+          {@const px = radialPx(mask)}
+          {@const featherEnd = 1 + mask.feather}
+          {@const featherKnobD = px.ry * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET)}
+          {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
+          {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
+          <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
+            <!-- Outer halo (where weight = 0). Only drawn when feather > 0;
+               otherwise it would coincide with the main ellipse. -->
+            {#if mask.feather > 0.001}
+              <ellipse
+                cx={px.cx}
+                cy={px.cy}
+                rx={px.rx * featherEnd}
+                ry={px.ry * featherEnd}
+                fill="none"
+                stroke="#7dd3fc"
+                stroke-width="1"
+                stroke-dasharray="3 3"
+                stroke-opacity="0.7"
+                pointer-events="none"
+              />
+            {/if}
+            <!-- Main / drawn ellipse — the solid inner boundary (everything
+               inside is fully affected). -->
+            <ellipse
+              cx={px.cx}
+              cy={px.cy}
+              rx={px.rx}
+              ry={px.ry}
+              fill="none"
+              stroke="#7dd3fc"
+              stroke-width="2"
+              stroke-dasharray="6 4"
+              pointer-events="none"
+            />
+            <!-- Feather knob: yellow diamond at the top of the outer halo
+               ellipse (or main top when feather = 0). Drag outward to soften,
+               inward to sharpen. -->
             <rect
-              x={guides.knobX - 6}
-              y={guides.knobY - 6}
+              x={px.cx - 6}
+              y={px.cy - featherKnobD - 6}
               width="12"
               height="12"
               fill="#facc15"
               stroke="#000"
               stroke-width="1"
-              transform="rotate(45 {guides.knobX} {guides.knobY})"
+              transform="rotate(45 {px.cx} {px.cy - featherKnobD})"
               style="cursor: grab;"
-              onpointerdown={(e) => dragLinearMid(e, i, mask)}
+              onpointerdown={(e) => dragRadialFeather(e, i, mask)}
             />
-          {/if}
-          <circle
-            cx={px.ax}
-            cy={px.ay}
-            r="9"
-            fill="#0ea5e9"
-            stroke="white"
-            stroke-width="2"
-            style="cursor: grab;"
-            onpointerdown={(e) => dragLinearA(e, i, mask)}
-          />
-          <circle
-            cx={px.bx}
-            cy={px.by}
-            r="9"
-            fill="white"
-            stroke="#0ea5e9"
-            stroke-width="2.5"
-            style="cursor: grab;"
-            onpointerdown={(e) => dragLinearB(e, i, mask)}
-          />
-        </g>
-      {:else}
-        {@const px = radialPx(mask)}
-        {@const featherEnd = 1 + mask.feather}
-        {@const featherKnobD = px.ry * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET)}
-        {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
-        {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
-        <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
-          <!-- Outer halo (where weight = 0). Only drawn when feather > 0;
-               otherwise it would coincide with the main ellipse. -->
-          {#if mask.feather > 0.001}
-            <ellipse
-              cx={px.cx}
-              cy={px.cy}
-              rx={px.rx * featherEnd}
-              ry={px.ry * featherEnd}
-              fill="none"
-              stroke="#7dd3fc"
-              stroke-width="1"
-              stroke-dasharray="3 3"
-              stroke-opacity="0.7"
-              pointer-events="none"
-            />
-          {/if}
-          <!-- Main / drawn ellipse — the solid inner boundary (everything
-               inside is fully affected). -->
-          <ellipse
-            cx={px.cx}
-            cy={px.cy}
-            rx={px.rx}
-            ry={px.ry}
-            fill="none"
-            stroke="#7dd3fc"
-            stroke-width="2"
-            stroke-dasharray="6 4"
-            pointer-events="none"
-          />
-          <!-- Feather knob: yellow diamond at the top of the outer halo
-               ellipse (or main top when feather = 0). Drag outward to soften,
-               inward to sharpen. -->
-          <rect
-            x={px.cx - 6}
-            y={px.cy - featherKnobD - 6}
-            width="12"
-            height="12"
-            fill="#facc15"
-            stroke="#000"
-            stroke-width="1"
-            transform="rotate(45 {px.cx} {px.cy - featherKnobD})"
-            style="cursor: grab;"
-            onpointerdown={(e) => dragRadialFeather(e, i, mask)}
-          />
-          <!-- Mid knob: biases the falloff curve. Only meaningful (and only
+            <!-- Mid knob: biases the falloff curve. Only meaningful (and only
                drawn) when feather > 0. Sits on the y-axis between main top
                and the feather knob, with a small horizontal offset and
                connector tick so it reads as belonging to the falloff band. -->
-          {#if mask.feather > 0.001}
-            {@const midParam = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
-            {@const midKnobY = px.cy - px.ry - midParam * (featherKnobD - px.ry)}
-            {@const midKnobX = px.cx + 18}
-            <line
-              x1={px.cx}
-              y1={midKnobY}
-              x2={midKnobX}
-              y2={midKnobY}
-              stroke="#facc15"
-              stroke-width="1.5"
-              pointer-events="none"
-            />
-            <rect
-              x={midKnobX - 5}
-              y={midKnobY - 5}
-              width="10"
-              height="10"
+            {#if mask.feather > 0.001}
+              {@const midParam = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
+              {@const midKnobY = px.cy - px.ry - midParam * (featherKnobD - px.ry)}
+              {@const midKnobX = px.cx + 18}
+              <line
+                x1={px.cx}
+                y1={midKnobY}
+                x2={midKnobX}
+                y2={midKnobY}
+                stroke="#facc15"
+                stroke-width="1.5"
+                pointer-events="none"
+              />
+              <rect
+                x={midKnobX - 5}
+                y={midKnobY - 5}
+                width="10"
+                height="10"
+                fill="#facc15"
+                stroke="#000"
+                stroke-width="1"
+                transform="rotate(45 {midKnobX} {midKnobY})"
+                style="cursor: grab;"
+                onpointerdown={(e) => dragRadialMid(e, i, mask)}
+              />
+            {/if}
+            <!-- Size handle: scales rx and ry uniformly (preserves aspect /
+               keeps a circle a circle). 4:30 position to stay clear of the
+               rx (3 o'clock) and ry (6 o'clock) handles. -->
+            <circle
+              cx={sizeHandleX}
+              cy={sizeHandleY}
+              r="7"
               fill="#facc15"
               stroke="#000"
               stroke-width="1"
-              transform="rotate(45 {midKnobX} {midKnobY})"
-              style="cursor: grab;"
-              onpointerdown={(e) => dragRadialMid(e, i, mask)}
+              style="cursor: nwse-resize;"
+              onpointerdown={(e) => dragRadialSize(e, i, mask)}
             />
-          {/if}
-          <!-- Size handle: scales rx and ry uniformly (preserves aspect /
-               keeps a circle a circle). 4:30 position to stay clear of the
-               rx (3 o'clock) and ry (6 o'clock) handles. -->
-          <circle
-            cx={sizeHandleX}
-            cy={sizeHandleY}
-            r="7"
-            fill="#facc15"
-            stroke="#000"
-            stroke-width="1"
-            style="cursor: nwse-resize;"
-            onpointerdown={(e) => dragRadialSize(e, i, mask)}
-          />
-          <circle
-            cx={px.cx}
-            cy={px.cy}
-            r="9"
-            fill="#0ea5e9"
-            stroke="white"
-            stroke-width="2"
-            style="cursor: move;"
-            onpointerdown={(e) => dragRadialCenter(e, i, mask)}
-          />
-          <circle
-            cx={px.cx + px.rx}
-            cy={px.cy}
-            r="7"
-            fill="white"
-            stroke="#0ea5e9"
-            stroke-width="2"
-            style="cursor: ew-resize;"
-            onpointerdown={(e) => dragRadialRx(e, i, mask)}
-          />
-          <circle
-            cx={px.cx}
-            cy={px.cy + px.ry}
-            r="7"
-            fill="white"
-            stroke="#0ea5e9"
-            stroke-width="2"
-            style="cursor: ns-resize;"
-            onpointerdown={(e) => dragRadialRy(e, i, mask)}
-          />
-        </g>
+            <circle
+              cx={px.cx}
+              cy={px.cy}
+              r="9"
+              fill="#0ea5e9"
+              stroke="white"
+              stroke-width="2"
+              style="cursor: move;"
+              onpointerdown={(e) => dragRadialCenter(e, i, mask)}
+            />
+            <circle
+              cx={px.cx + px.rx}
+              cy={px.cy}
+              r="7"
+              fill="white"
+              stroke="#0ea5e9"
+              stroke-width="2"
+              style="cursor: ew-resize;"
+              onpointerdown={(e) => dragRadialRx(e, i, mask)}
+            />
+            <circle
+              cx={px.cx}
+              cy={px.cy + px.ry}
+              r="7"
+              fill="white"
+              stroke="#0ea5e9"
+              stroke-width="2"
+              style="cursor: ns-resize;"
+              onpointerdown={(e) => dragRadialRy(e, i, mask)}
+            />
+          </g>
+        {/if}
       {/if}
+    {/each}
+
+    <!-- Draw-mode preview shape (while user is dragging) -->
+    {#if previewLinear}
+      <line
+        x1={previewLinear.ax}
+        y1={previewLinear.ay}
+        x2={previewLinear.bx}
+        y2={previewLinear.by}
+        stroke="#0ea5e9"
+        stroke-width="2"
+        pointer-events="none"
+      />
+      <circle cx={previewLinear.ax} cy={previewLinear.ay} r="6" fill="#0ea5e9" pointer-events="none" />
+      <circle
+        cx={previewLinear.bx}
+        cy={previewLinear.by}
+        r="6"
+        fill="white"
+        stroke="#0ea5e9"
+        stroke-width="2"
+        pointer-events="none"
+      />
+    {/if}
+
+    {#if previewRadial}
+      <ellipse
+        cx={previewRadial.cx}
+        cy={previewRadial.cy}
+        rx={previewRadial.rx}
+        ry={previewRadial.ry}
+        fill="rgba(14, 165, 233, 0.1)"
+        stroke="#0ea5e9"
+        stroke-width="2"
+        pointer-events="none"
+      />
+      <circle cx={previewRadial.cx} cy={previewRadial.cy} r="6" fill="#0ea5e9" pointer-events="none" />
+    {/if}
+
+    <!-- Draw-mode hint (shown before the user clicks). Brush mode owns its
+       own UI (size slider) so we hide this banner there. -->
+    {#if pendingKind && pendingKind !== 'brush' && !drawStart}
+      <g pointer-events="none">
+        <rect x={svgWidth / 2 - 140} y="20" width="280" height="32" rx="6" fill="rgba(0, 0, 0, 0.7)" />
+        <text
+          x={svgWidth / 2}
+          y="40"
+          text-anchor="middle"
+          fill="white"
+          font-size="13"
+          font-family="system-ui, sans-serif"
+        >
+          {pendingKind === 'linear' ? 'Click and drag to draw the gradient' : 'Click and drag from center outward'}
+        </text>
+      </g>
+    {/if}
+  </svg>
+
+  <!-- Brush mask overlays. Three states:
+     1. pendingMaskKind === 'brush' (no committed brush mask yet) → show an
+        editable brush canvas; first stroke commits a new BrushMask.
+     2. editingIndex points at a brush mask → show an editable brush canvas
+        bound to that mask.
+     3. Any committed brush mask not currently being edited → show a
+        non-interactive red tint of the painted area so the user remembers
+        where the mask sits without it eating clicks. -->
+  <!-- Render readonly tints first so the editing overlay (or pending paint
+     surface) ends up on top in DOM order; the editing overlay has its own
+     interactive canvas and accepts paint events. -->
+  {#each masks as mask, i (i)}
+    {#if mask.kind === 'brush' && i !== editingIndex}
+      <BrushOverlay maskIndex={i} readonly />
     {/if}
   {/each}
-
-  <!-- Draw-mode preview shape (while user is dragging) -->
-  {#if previewLinear}
-    <line
-      x1={previewLinear.ax}
-      y1={previewLinear.ay}
-      x2={previewLinear.bx}
-      y2={previewLinear.by}
-      stroke="#0ea5e9"
-      stroke-width="2"
-      pointer-events="none"
-    />
-    <circle cx={previewLinear.ax} cy={previewLinear.ay} r="6" fill="#0ea5e9" pointer-events="none" />
-    <circle cx={previewLinear.bx} cy={previewLinear.by} r="6" fill="white" stroke="#0ea5e9" stroke-width="2" pointer-events="none" />
+  {#each masks as mask, i (i)}
+    {#if mask.kind === 'brush' && i === editingIndex}
+      <BrushOverlay maskIndex={i} />
+    {/if}
+  {/each}
+  {#if pendingKind === 'brush'}
+    <BrushOverlay maskIndex={null} />
   {/if}
-
-  {#if previewRadial}
-    <ellipse
-      cx={previewRadial.cx}
-      cy={previewRadial.cy}
-      rx={previewRadial.rx}
-      ry={previewRadial.ry}
-      fill="rgba(14, 165, 233, 0.1)"
-      stroke="#0ea5e9"
-      stroke-width="2"
-      pointer-events="none"
-    />
-    <circle cx={previewRadial.cx} cy={previewRadial.cy} r="6" fill="#0ea5e9" pointer-events="none" />
-  {/if}
-
-  <!-- Draw-mode hint (shown before the user clicks) -->
-  {#if pendingKind && !drawStart}
-    <g pointer-events="none">
-      <rect
-        x={svgWidth / 2 - 140}
-        y="20"
-        width="280"
-        height="32"
-        rx="6"
-        fill="rgba(0, 0, 0, 0.7)"
-      />
-      <text
-        x={svgWidth / 2}
-        y="40"
-        text-anchor="middle"
-        fill="white"
-        font-size="13"
-        font-family="system-ui, sans-serif"
-      >
-        {pendingKind === 'linear'
-          ? 'Click and drag to draw the gradient'
-          : 'Click and drag from center outward'}
-      </text>
-    </g>
-  {/if}
-</svg>
+</div>
