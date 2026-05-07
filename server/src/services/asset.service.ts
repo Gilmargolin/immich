@@ -430,12 +430,20 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset not found or has no preview image');
     }
 
+    const inatToken = process.env.INAT_API_TOKEN;
+    if (!inatToken) {
+      throw new BadRequestException(
+        'INAT_API_TOKEN is not set. Get a token via: curl "https://www.inaturalist.org/users/api_token" -u "email:password"',
+      );
+    }
+
     const fileBuffer = await readFile(asset.previewFile);
     const formData = new FormData();
     formData.append('image', new Blob([new Uint8Array(fileBuffer)], { type: 'image/jpeg' }));
 
     const response = await fetch('https://api.inaturalist.org/v1/computervision/score_image', {
       method: 'POST',
+      headers: { Authorization: `Bearer ${inatToken}` },
       body: formData,
     });
 
