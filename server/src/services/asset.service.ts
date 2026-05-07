@@ -54,6 +54,35 @@ import { transformOcrBoundingBox } from 'src/utils/transform';
 
 @Injectable()
 export class AssetService extends BaseService {
+  private inatToken: string | null = null;
+  private inatTokenExpiry = 0;
+
+  private async getInatToken(): Promise<string> {
+    if (this.inatToken && Date.now() < this.inatTokenExpiry - 60_000) {
+      return this.inatToken;
+    }
+
+    const email = process.env.INAT_EMAIL;
+    const password = process.env.INAT_PASSWORD;
+    if (!email || !password) {
+      throw new BadRequestException('INAT_EMAIL and INAT_PASSWORD must be set in the server environment');
+    }
+
+    const response = await fetch('https://www.inaturalist.org/users/api_token', {
+      headers: { Authorization: `Basic ${Buffer.from(`${email}:${password}`).toString('base64')}` },
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException(`Failed to authenticate with iNaturalist: ${response.status}`);
+    }
+
+    const { api_token } = (await response.json()) as { api_token: string };
+    const payload = JSON.parse(Buffer.from(api_token.split('.')[1], 'base64url').toString()) as { exp: number };
+    this.inatToken = api_token;
+    this.inatTokenExpiry = payload.exp * 1000;
+    return this.inatToken;
+  }
+
   async getStatistics(auth: AuthDto, dto: AssetStatsDto) {
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
@@ -430,12 +459,7 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset not found or has no preview image');
     }
 
-    const inatToken = process.env.INAT_API_TOKEN;
-    if (!inatToken) {
-      throw new BadRequestException(
-        'INAT_API_TOKEN is not set. Get a token via: curl "https://www.inaturalist.org/users/api_token" -u "email:password"',
-      );
-    }
+    const inatToken = await this.getInatToken();
 
     const fileBuffer = await readFile(asset.previewFile);
     const formData = new FormData();
