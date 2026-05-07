@@ -1,8 +1,11 @@
 <script lang="ts">
   import { handleError } from '$lib/utils/handle-error';
   import {
+    bulkTagAssets,
+    getAssetMetadataByKey,
     identifyAssetSubject,
     updateAssetMetadata,
+    upsertTags,
     type AssetResponseDto,
     type IdentifyResultDto,
   } from '@immich/sdk';
@@ -13,7 +16,7 @@
     asset: AssetResponseDto;
   }
 
-  let { asset }: Props = $props();
+  let { asset = $bindable() }: Props = $props();
 
   let results: IdentifyResultDto[] = $state([]);
   let selectedIndex = $state(0);
@@ -22,24 +25,43 @@
   let ran = $state(false);
 
   const iconicTaxonIcon: Record<string, string> = {
-    Plantae: '🌿',
-    Fungi: '🍄',
-    Aves: '🐦',
-    Mammalia: '🐾',
-    Reptilia: '🦎',
-    Amphibia: '🐸',
-    Actinopterygii: '🐟',
-    Insecta: '🐛',
-    Arachnida: '🕷️',
-    Mollusca: '🐚',
+    Plantae: '🌿', Fungi: '🍄', Aves: '🐦', Mammalia: '🐾',
+    Reptilia: '🦎', Amphibia: '🐸', Actinopterygii: '🐟',
+    Insecta: '🐛', Arachnida: '🕷️', Mollusca: '🐚',
   };
-
   const taxonLabel = (name: string) => iconicTaxonIcon[name] ?? '🔬';
-
-  // iNaturalist combined_score can exceed 1 for high-confidence top matches.
-  // Clamp to 100 and display as integer percent.
   const formatScore = (score: number) =>
     `${Math.min(100, Math.round(score > 1 ? score : score * 100))}%`;
+
+  // Load saved species on mount
+  $effect(() => {
+    getAssetMetadataByKey({ id: asset.id, key: 'species' })
+      .then((meta) => {
+        const saved = meta.value as unknown as IdentifyResultDto;
+        if (saved?.scientificName) {
+          results = [saved];
+          selectedIndex = 0;
+          ran = true;
+        }
+      })
+      .catch(() => {
+        // no saved species yet — that's fine
+      });
+  });
+
+  const saveSelection = async (index: number) => {
+    const result = results[index];
+    await updateAssetMetadata({
+      id: asset.id,
+      assetMetadataUpsertDto: { items: [{ key: 'species', value: result as unknown as object }] },
+    });
+    // Upsert tag e.g. "species/Blue Jay" and apply to this asset
+    const tagValue = `species/${result.commonName ?? result.scientificName}`;
+    const [tag] = await upsertTags({ tagUpsertDto: { tags: [tagValue] } });
+    if (tag) {
+      await bulkTagAssets({ tagBulkAssetsDto: { tagIds: [tag.id], assetIds: [asset.id] } });
+    }
+  };
 
   const handleIdentify = async () => {
     loading = true;
@@ -48,6 +70,14 @@
       results = response.results;
       selectedIndex = 0;
       ran = true;
+      // Top result is already saved server-side; also tag it
+      if (results.length > 0) {
+        const tagValue = `species/${results[0].commonName ?? results[0].scientificName}`;
+        const [tag] = await upsertTags({ tagUpsertDto: { tags: [tagValue] } });
+        if (tag) {
+          await bulkTagAssets({ tagBulkAssetsDto: { tagIds: [tag.id], assetIds: [asset.id] } });
+        }
+      }
     } catch (error) {
       handleError(error, 'Failed to identify subject');
     } finally {
@@ -59,10 +89,7 @@
     if (index === selectedIndex || saving) return;
     saving = true;
     try {
-      await updateAssetMetadata({
-        id: asset.id,
-        assetMetadataUpsertDto: { items: [{ key: 'species', value: results[index] as unknown as object }] },
-      });
+      await saveSelection(index);
       selectedIndex = index;
     } catch (error) {
       handleError(error, 'Failed to save selection');
@@ -78,7 +105,7 @@
       <Icon icon={mdiLeaf} size="18" />
       <span class="text-sm">Identify Subject</span>
     </div>
-    <Button size="small" color="secondary" variant="ghost" shape="round" onclick={handleIdentify} disabled={loading}>
+    <Button size="small" color="secondary" variant="ghost" shape="round" onclick={handleIdentify} disabled={loading || saving}>
       {#if loading}
         <LoadingSpinner />
       {:else if ran}
@@ -104,26 +131,15 @@
           disabled={saving}
         >
           {#if result.photoUrl}
-            <img
-              src={result.photoUrl}
-              alt={result.scientificName}
-              class="w-12 h-12 rounded object-cover flex-shrink-0"
-            />
+            <img src={result.photoUrl} alt={result.scientificName} class="w-12 h-12 rounded object-cover flex-shrink-0" />
           {:else}
-            <div
-              class="w-12 h-12 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl flex-shrink-0"
-            >
+            <div class="w-12 h-12 rounded bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-2xl flex-shrink-0">
               {taxonLabel(result.iconicTaxon)}
             </div>
           {/if}
-
           <div class="flex-1 min-w-0">
-            <p class="font-medium text-sm truncate">
-              {result.commonName ?? result.scientificName}
-            </p>
-            <p class="text-xs text-gray-500 dark:text-gray-400 italic truncate">
-              {result.scientificName}
-            </p>
+            <p class="font-medium text-sm truncate">{result.commonName ?? result.scientificName}</p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 italic truncate">{result.scientificName}</p>
             <div class="flex items-center gap-2 mt-1">
               <span class="text-xs text-gray-400">{taxonLabel(result.iconicTaxon)} {result.iconicTaxon}</span>
               <span class="text-xs text-gray-400">{formatScore(result.score)}</span>
@@ -134,16 +150,15 @@
                   rel="noopener noreferrer"
                   class="text-xs text-primary-600 dark:text-primary-400 hover:underline"
                   onclick={(e) => e.stopPropagation()}
-                >
-                  Wikipedia ↗
-                </a>
+                >Wikipedia ↗</a>
               {/if}
             </div>
           </div>
         </button>
       {/each}
     </div>
-
-    <p class="text-xs text-gray-400 mt-1 px-1">Tap a result to save it as this photo's subject</p>
+    {#if results.length > 1}
+      <p class="text-xs text-gray-400 mt-1 px-1">Tap a result to save it as this photo's subject</p>
+    {/if}
   {/if}
 </section>
