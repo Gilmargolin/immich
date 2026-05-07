@@ -29,7 +29,14 @@
     Reptilia: '🦎', Amphibia: '🐸', Actinopterygii: '🐟',
     Insecta: '🐛', Arachnida: '🕷️', Mollusca: '🐚',
   };
+  const iconicTaxonLabel: Record<string, string> = {
+    Plantae: 'Plant', Fungi: 'Fungus', Aves: 'Bird', Mammalia: 'Mammal',
+    Reptilia: 'Reptile', Amphibia: 'Amphibian', Actinopterygii: 'Fish',
+    Insecta: 'Insect', Arachnida: 'Arachnid', Mollusca: 'Mollusk',
+    Animalia: 'Animal', Chromista: 'Chromist', Protozoa: 'Protozoa',
+  };
   const taxonLabel = (name: string) => iconicTaxonIcon[name] ?? '🔬';
+  const taxonCategory = (name: string) => iconicTaxonLabel[name] ?? name;
   const formatScore = (score: number) =>
     `${Math.min(100, Math.round(score > 1 ? score : score * 100))}%`;
 
@@ -56,7 +63,7 @@
       assetMetadataUpsertDto: { items: [{ key: 'species', value: result as unknown as object }] },
     });
     // Upsert tag e.g. "species/Blue Jay" and apply to this asset
-    const tagValue = `species/${result.commonName ?? result.scientificName}`;
+    const tagValue = `${taxonCategory(result.iconicTaxon)}/${result.commonName ?? result.scientificName}`;
     const [tag] = await upsertTags({ tagUpsertDto: { tags: [tagValue] } });
     if (tag) {
       await bulkTagAssets({ tagBulkAssetsDto: { tagIds: [tag.id], assetIds: [asset.id] } });
@@ -141,7 +148,7 @@
             <p class="font-medium text-sm truncate">{result.commonName ?? result.scientificName}</p>
             <p class="text-xs text-gray-500 dark:text-gray-400 italic truncate">{result.scientificName}</p>
             <div class="flex items-center gap-2 mt-1">
-              <span class="text-xs text-gray-400">{taxonLabel(result.iconicTaxon)} {result.iconicTaxon}</span>
+              <span class="text-xs text-gray-400">{taxonLabel(result.iconicTaxon)} {taxonCategory(result.iconicTaxon)}</span>
               <span class="text-xs text-gray-400">{formatScore(result.score)}</span>
               {#if result.wikiUrl}
                 <a
