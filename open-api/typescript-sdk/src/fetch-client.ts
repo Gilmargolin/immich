@@ -962,32 +962,111 @@ export type CropParameters = {
     y: number;
 };
 export type RotateParameters = {
-    /** Rotation angle in degrees */
+    /** Rotation angle in degrees (0-360, supports fractional values for free rotation) */
     angle: number;
 };
 export type MirrorParameters = {
     /** Axis to mirror along */
     axis: MirrorAxis;
 };
-export type AdjustParameters = {
+export type AdjustmentSliders = {
+    /** Black point adjustment (-1 to 1, 0 = no change) */
+    blackPoint: number;
     /** Brightness adjustment (-1 to 1, 0 = no change) */
     brightness: number;
     /** Contrast adjustment (-1 to 1, 0 = no change) */
     contrast: number;
-    /** Saturation adjustment (-1 to 1, 0 = no change) */
-    saturation: number;
-    /** Warmth / color temperature adjustment (-1 to 1, 0 = no change) */
-    warmth: number;
-    /** Tint adjustment, green vs magenta (-1 to 1, 0 = no change) */
-    tint: number;
     /** Highlights adjustment (-1 to 1, 0 = no change) */
     highlights: number;
+    /** Saturation adjustment (-1 to 1, 0 = no change) */
+    saturation: number;
     /** Shadows adjustment (-1 to 1, 0 = no change) */
     shadows: number;
+    /** Tint adjustment, green vs magenta (-1 to 1, 0 = no change) */
+    tint: number;
+    /** Warmth / color temperature adjustment (-1 to 1, 0 = no change) */
+    warmth: number;
     /** White point adjustment (-1 to 1, 0 = no change) */
     whitePoint: number;
+};
+export type LinearMask = {
+    /** Normalized x of point A (weight=1) */
+    ax: number;
+    /** Normalized y of point A (weight=1) */
+    ay: number;
+    /** Normalized x of point B (weight=0) */
+    bx: number;
+    /** Normalized y of point B (weight=0) */
+    by: number;
+    /** Mask kind discriminator */
+    kind: LocalMaskKind;
+    /** Luminance gate upper bound (0..1, default 1). Pixels with luminance above lumHigh receive less mask weight, smoothly falling to zero. Must satisfy lumLow ≤ lumHigh. */
+    lumHigh?: number;
+    /** Luminance gate lower bound (0..1, default 0). Pixels with Rec.709 luminance below lumLow receive less mask weight, smoothly falling to zero over a fixed band. Use together with lumHigh to limit a mask to a luminance range (e.g. only the dark feathers of a bird). */
+    lumLow?: number;
+    /** Position along AB where weight = 0.5 (0..1, default 0.5). Move toward A or B to bias the falloff curve away from a pure linear ramp. */
+    mid?: number;
+    /** Adjustments to apply where this mask has weight > 0 */
+    params: AdjustmentSliders;
+};
+export type RadialMask = {
+    /** Ellipse rotation in degrees */
+    angle: number;
+    /** Normalized x of ellipse center */
+    cx: number;
+    /** Normalized y of ellipse center */
+    cy: number;
+    /** Width of the outer falloff halo, as a fraction of the semi-axis. The drawn ellipse is always the solid inner boundary (weight = 1 anywhere inside). Weight transitions from 1 at the ellipse to 0 at (1 + feather)·r outside. 0 = sharp edge. The wide upper bound (100) lets users feather a small "focus spot" out across an entire image. */
+    feather: number;
+    /** False = weight 1 inside ellipse; true = weight 1 outside */
+    invert: boolean;
+    /** Mask kind discriminator */
+    kind: LocalMaskKind;
+    /** Luminance gate upper bound (0..1, default 1). Pixels with luminance above lumHigh receive less mask weight, smoothly falling to zero. Must satisfy lumLow ≤ lumHigh. */
+    lumHigh?: number;
+    /** Luminance gate lower bound (0..1, default 0). Pixels with Rec.709 luminance below lumLow receive less mask weight, smoothly falling to zero over a fixed band. Use together with lumHigh to limit a mask to a luminance range (e.g. only the dark feathers of a bird). */
+    lumLow?: number;
+    /** Position within the outer falloff band where weight = 0.5 (0..1, default 0.5). Bias toward 0 to keep the falloff sharp near the inner edge; toward 1 to keep it sharp near the outer edge. */
+    mid?: number;
+    /** Adjustments to apply where this mask has weight > 0 */
+    params: AdjustmentSliders;
+    /** Normalized x-semi-axis (to min(W,H)) */
+    rx: number;
+    /** Normalized y-semi-axis (to min(W,H)) */
+    ry: number;
+};
+export type BrushMask = {
+    /** Mask kind discriminator */
+    kind: LocalMaskKind;
+    /** Luminance gate upper bound (0..1, default 1). Must satisfy lumLow ≤ lumHigh. */
+    lumHigh?: number;
+    /** Luminance gate lower bound (0..1, default 0). Combine with lumHigh to restrict the brush effect to a luminance range — e.g. paint a region and only affect the dark feathers within it. */
+    lumLow?: number;
+    /** Base64-encoded grayscale PNG of the painted alpha mask. Either a raw base64 string or a `data:image/png;base64,...` data URL is accepted. Resolution is fixed at 512×512 and the encoded payload must be ≤ 300000 characters. */
+    mask: string;
+    /** Adjustments to apply where this mask has weight > 0 */
+    params: AdjustmentSliders;
+};
+export type AdjustParameters = {
     /** Black point adjustment (-1 to 1, 0 = no change) */
     blackPoint: number;
+    /** Brightness adjustment (-1 to 1, 0 = no change) */
+    brightness: number;
+    /** Contrast adjustment (-1 to 1, 0 = no change) */
+    contrast: number;
+    /** Highlights adjustment (-1 to 1, 0 = no change) */
+    highlights: number;
+    masks: (LinearMask | RadialMask | BrushMask)[];
+    /** Saturation adjustment (-1 to 1, 0 = no change) */
+    saturation: number;
+    /** Shadows adjustment (-1 to 1, 0 = no change) */
+    shadows: number;
+    /** Tint adjustment, green vs magenta (-1 to 1, 0 = no change) */
+    tint: number;
+    /** Warmth / color temperature adjustment (-1 to 1, 0 = no change) */
+    warmth: number;
+    /** White point adjustment (-1 to 1, 0 = no change) */
+    whitePoint: number;
 };
 export type AssetEditActionItemResponseDto = {
     /** Type of edit action to perform */
@@ -1009,8 +1088,19 @@ export type AssetEditActionItemDto = {
     parameters: CropParameters | RotateParameters | MirrorParameters | AdjustParameters;
 };
 export type AssetEditsCreateDto = {
-    /** List of edit actions to apply (crop, rotate, mirror, or adjust) */
+    /** List of edit actions to apply (crop, rotate, or mirror) */
     edits: AssetEditActionItemDto[];
+};
+export type IdentifyResultDto = {
+    commonName?: string | null;
+    iconicTaxon: string;
+    photoUrl?: string | null;
+    scientificName: string;
+    score: number;
+    wikiUrl?: string | null;
+};
+export type IdentifyResponseDto = {
+    results: IdentifyResultDto[];
 };
 export type AssetMetadataResponseDto = {
     /** Metadata key */
@@ -4218,6 +4308,20 @@ export function editAsset({ id, assetEditsCreateDto }: {
     })));
 }
 /**
+ * Identify subject in asset
+ */
+export function identifyAssetSubject({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: IdentifyResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/identify`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
  * Get asset metadata
  */
 export function getAssetMetadata({ id }: {
@@ -7140,6 +7244,11 @@ export enum MirrorAxis {
     Horizontal = "horizontal",
     Vertical = "vertical"
 }
+export enum LocalMaskKind {
+    Linear = "linear",
+    Radial = "radial",
+    Brush = "brush"
+}
 export enum AssetMediaSize {
     Original = "original",
     Fullsize = "fullsize",
@@ -7218,6 +7327,7 @@ export enum JobName {
     AssetDetectDuplicatesQueueAll = "AssetDetectDuplicatesQueueAll",
     AssetDetectDuplicates = "AssetDetectDuplicates",
     AssetEditThumbnailGeneration = "AssetEditThumbnailGeneration",
+    AssetFindEditedParent = "AssetFindEditedParent",
     AssetEncodeVideoQueueAll = "AssetEncodeVideoQueueAll",
     AssetEncodeVideo = "AssetEncodeVideo",
     AssetEmptyTrash = "AssetEmptyTrash",

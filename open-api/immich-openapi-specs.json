@@ -3803,6 +3803,62 @@
         "x-immich-state": "Beta"
       }
     },
+    "/assets/{id}/identify": {
+      "post": {
+        "description": "Use iNaturalist to identify plants, animals, birds, and other organisms in an image. Returns up to 5 candidate taxa with Wikipedia links. Stores the top result in asset metadata.",
+        "operationId": "identifyAssetSubject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentifyResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Identify subject in asset",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "asset.read",
+        "x-immich-state": "Beta"
+      }
+    },
     "/assets/{id}/metadata": {
       "get": {
         "description": "Retrieve all metadata key-value pairs associated with the specified asset.",
@@ -15599,6 +15655,170 @@
         ],
         "type": "object"
       },
+      "AdjustParameters": {
+        "properties": {
+          "blackPoint": {
+            "description": "Black point adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "brightness": {
+            "description": "Brightness adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "contrast": {
+            "description": "Contrast adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "highlights": {
+            "description": "Highlights adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "masks": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/LinearMask"
+                },
+                {
+                  "$ref": "#/components/schemas/RadialMask"
+                },
+                {
+                  "$ref": "#/components/schemas/BrushMask"
+                }
+              ],
+              "description": "Optional local-adjustment masks (up to 8). Stack in order; later masks layer on top.",
+              "items": {
+                "type": "object"
+              },
+              "maxItems": 8,
+              "required": false,
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "saturation": {
+            "description": "Saturation adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "shadows": {
+            "description": "Shadows adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "tint": {
+            "description": "Tint adjustment, green vs magenta (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "warmth": {
+            "description": "Warmth / color temperature adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "whitePoint": {
+            "description": "White point adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "blackPoint",
+          "brightness",
+          "contrast",
+          "highlights",
+          "masks",
+          "saturation",
+          "shadows",
+          "tint",
+          "warmth",
+          "whitePoint"
+        ],
+        "type": "object"
+      },
+      "AdjustmentSliders": {
+        "properties": {
+          "blackPoint": {
+            "description": "Black point adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "brightness": {
+            "description": "Brightness adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "contrast": {
+            "description": "Contrast adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "highlights": {
+            "description": "Highlights adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "saturation": {
+            "description": "Saturation adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "shadows": {
+            "description": "Shadows adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "tint": {
+            "description": "Tint adjustment, green vs magenta (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "warmth": {
+            "description": "Warmth / color temperature adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          "whitePoint": {
+            "description": "White point adjustment (-1 to 1, 0 = no change)",
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "blackPoint",
+          "brightness",
+          "contrast",
+          "highlights",
+          "saturation",
+          "shadows",
+          "tint",
+          "warmth",
+          "whitePoint"
+        ],
+        "type": "object"
+      },
       "AdminOnboardingUpdateDto": {
         "properties": {
           "isOnboarded": {
@@ -16176,7 +16396,8 @@
         "enum": [
           "crop",
           "rotate",
-          "mirror"
+          "mirror",
+          "adjust"
         ],
         "type": "string"
       },
@@ -16200,9 +16421,12 @@
               },
               {
                 "$ref": "#/components/schemas/MirrorParameters"
+              },
+              {
+                "$ref": "#/components/schemas/AdjustParameters"
               }
             ],
-            "description": "List of edit actions to apply (crop, rotate, or mirror)"
+            "description": "List of edit actions to apply (crop, rotate, mirror, or adjust)"
           }
         },
         "required": [
@@ -16235,9 +16459,12 @@
               },
               {
                 "$ref": "#/components/schemas/MirrorParameters"
+              },
+              {
+                "$ref": "#/components/schemas/AdjustParameters"
               }
             ],
-            "description": "List of edit actions to apply (crop, rotate, or mirror)"
+            "description": "List of edit actions to apply (crop, rotate, mirror, or adjust)"
           }
         },
         "required": [
@@ -17352,6 +17579,50 @@
         },
         "type": "object"
       },
+      "BrushMask": {
+        "properties": {
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LocalMaskKind"
+              }
+            ],
+            "description": "Mask kind discriminator"
+          },
+          "lumHigh": {
+            "description": "Luminance gate upper bound (0..1, default 1). Must satisfy lumLow ≤ lumHigh.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "lumLow": {
+            "description": "Luminance gate lower bound (0..1, default 0). Combine with lumHigh to restrict the brush effect to a luminance range — e.g. paint a region and only affect the dark feathers within it.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "mask": {
+            "description": "Base64-encoded grayscale PNG of the painted alpha mask. Either a raw base64 string or a `data:image/png;base64,...` data URL is accepted. Resolution is fixed at 512×512 and the encoded payload must be ≤ 300000 characters.",
+            "maxLength": 300000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "params": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentSliders"
+              }
+            ],
+            "description": "Adjustments to apply where this mask has weight > 0"
+          }
+        },
+        "required": [
+          "kind",
+          "mask",
+          "params"
+        ],
+        "type": "object"
+      },
       "BulkIdErrorReason": {
         "description": "Error reason",
         "enum": [
@@ -18234,6 +18505,51 @@
         },
         "type": "object"
       },
+      "IdentifyResponseDto": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/IdentifyResultDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "type": "object"
+      },
+      "IdentifyResultDto": {
+        "properties": {
+          "commonName": {
+            "nullable": true,
+            "type": "string"
+          },
+          "iconicTaxon": {
+            "type": "string"
+          },
+          "photoUrl": {
+            "nullable": true,
+            "type": "string"
+          },
+          "scientificName": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "wikiUrl": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "iconicTaxon",
+          "scientificName",
+          "score"
+        ],
+        "type": "object"
+      },
       "ImageFormat": {
         "description": "Image format",
         "enum": [
@@ -18268,6 +18584,7 @@
           "AssetDetectDuplicatesQueueAll",
           "AssetDetectDuplicates",
           "AssetEditThumbnailGeneration",
+          "AssetFindEditedParent",
           "AssetEncodeVideoQueueAll",
           "AssetEncodeVideo",
           "AssetEmptyTrash",
@@ -18468,6 +18785,86 @@
           "licenseKey"
         ],
         "type": "object"
+      },
+      "LinearMask": {
+        "properties": {
+          "ax": {
+            "description": "Normalized x of point A (weight=1)",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "ay": {
+            "description": "Normalized y of point A (weight=1)",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "bx": {
+            "description": "Normalized x of point B (weight=0)",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "by": {
+            "description": "Normalized y of point B (weight=0)",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LocalMaskKind"
+              }
+            ],
+            "description": "Mask kind discriminator"
+          },
+          "lumHigh": {
+            "description": "Luminance gate upper bound (0..1, default 1). Pixels with luminance above lumHigh receive less mask weight, smoothly falling to zero. Must satisfy lumLow ≤ lumHigh.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "lumLow": {
+            "description": "Luminance gate lower bound (0..1, default 0). Pixels with Rec.709 luminance below lumLow receive less mask weight, smoothly falling to zero over a fixed band. Use together with lumHigh to limit a mask to a luminance range (e.g. only the dark feathers of a bird).",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "mid": {
+            "description": "Position along AB where weight = 0.5 (0..1, default 0.5). Move toward A or B to bias the falloff curve away from a pure linear ramp.",
+            "maximum": 0.95,
+            "minimum": 0.05,
+            "type": "number"
+          },
+          "params": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentSliders"
+              }
+            ],
+            "description": "Adjustments to apply where this mask has weight > 0"
+          }
+        },
+        "required": [
+          "ax",
+          "ay",
+          "bx",
+          "by",
+          "kind",
+          "params"
+        ],
+        "type": "object"
+      },
+      "LocalMaskKind": {
+        "description": "Mask kind discriminator",
+        "enum": [
+          "linear",
+          "radial",
+          "brush"
+        ],
+        "type": "string"
       },
       "LogLevel": {
         "enum": [
@@ -20807,6 +21204,96 @@
         ],
         "type": "object"
       },
+      "RadialMask": {
+        "properties": {
+          "angle": {
+            "description": "Ellipse rotation in degrees",
+            "maximum": 360,
+            "minimum": -360,
+            "type": "number"
+          },
+          "cx": {
+            "description": "Normalized x of ellipse center",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "cy": {
+            "description": "Normalized y of ellipse center",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "feather": {
+            "description": "Width of the outer falloff halo, as a fraction of the semi-axis. The drawn ellipse is always the solid inner boundary (weight = 1 anywhere inside). Weight transitions from 1 at the ellipse to 0 at (1 + feather)·r outside. 0 = sharp edge. The wide upper bound (100) lets users feather a small \"focus spot\" out across an entire image.",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "invert": {
+            "description": "False = weight 1 inside ellipse; true = weight 1 outside",
+            "type": "boolean"
+          },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LocalMaskKind"
+              }
+            ],
+            "description": "Mask kind discriminator"
+          },
+          "lumHigh": {
+            "description": "Luminance gate upper bound (0..1, default 1). Pixels with luminance above lumHigh receive less mask weight, smoothly falling to zero. Must satisfy lumLow ≤ lumHigh.",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "lumLow": {
+            "description": "Luminance gate lower bound (0..1, default 0). Pixels with Rec.709 luminance below lumLow receive less mask weight, smoothly falling to zero over a fixed band. Use together with lumHigh to limit a mask to a luminance range (e.g. only the dark feathers of a bird).",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "mid": {
+            "description": "Position within the outer falloff band where weight = 0.5 (0..1, default 0.5). Bias toward 0 to keep the falloff sharp near the inner edge; toward 1 to keep it sharp near the outer edge.",
+            "maximum": 0.95,
+            "minimum": 0.05,
+            "type": "number"
+          },
+          "params": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdjustmentSliders"
+              }
+            ],
+            "description": "Adjustments to apply where this mask has weight > 0"
+          },
+          "rx": {
+            "description": "Normalized x-semi-axis (to min(W,H))",
+            "maximum": 2,
+            "minimum": 0,
+            "type": "number"
+          },
+          "ry": {
+            "description": "Normalized y-semi-axis (to min(W,H))",
+            "maximum": 2,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "angle",
+          "cx",
+          "cy",
+          "feather",
+          "invert",
+          "kind",
+          "params",
+          "rx",
+          "ry"
+        ],
+        "type": "object"
+      },
       "RandomSearchDto": {
         "properties": {
           "albumIds": {
@@ -21059,7 +21546,7 @@
       "RotateParameters": {
         "properties": {
           "angle": {
-            "description": "Rotation angle in degrees",
+            "description": "Rotation angle in degrees (0-360, supports fractional values for free rotation)",
             "type": "number"
           }
         },

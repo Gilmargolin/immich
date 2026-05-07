@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import _ from 'lodash';
 import { DateTime, Duration } from 'luxon';
+import { readFile } from 'node:fs/promises';
 import { JOBS_ASSET_PAGINATION_SIZE } from 'src/constants';
 import { AssetFile } from 'src/database';
 import { OnJob } from 'src/decorators';
@@ -22,9 +23,11 @@ import {
 } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { AssetEditAction, AssetEditActionItem, AssetEditsCreateDto, AssetEditsResponseDto } from 'src/dtos/editing.dto';
+import { IdentifyResponseDto, IdentifyResultDto } from 'src/dtos/identify.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import {
   AssetFileType,
+  AssetMetadataKey,
   AssetStatus,
   AssetType,
   AssetVisibility,
@@ -417,6 +420,56 @@ export class AssetService extends BaseService {
     });
 
     return ocr.map((item) => transformOcrBoundingBox(item, asset.edits, dimensions));
+  }
+
+  async identifySubject(auth: AuthDto, id: string): Promise<IdentifyResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
+
+    const asset = await this.assetJobRepository.getForOcr(id);
+    if (!asset?.previewFile) {
+      throw new BadRequestException('Asset not found or has no preview image');
+    }
+
+    const fileBuffer = await readFile(asset.previewFile);
+    const formData = new FormData();
+    formData.append('image', new Blob([new Uint8Array(fileBuffer)], { type: 'image/jpeg' }));
+
+    const response = await fetch('https://api.inaturalist.org/v1/computervision/score_image', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException(`iNaturalist API error: ${response.status}`);
+    }
+
+    const data = (await response.json()) as {
+      results: Array<{
+        combined_score: number;
+        taxon: {
+          name: string;
+          preferred_common_name?: string;
+          iconic_taxon_name?: string;
+          wikipedia_url?: string;
+          default_photo?: { medium_url: string };
+        };
+      }>;
+    };
+
+    const results: IdentifyResultDto[] = (data.results ?? []).slice(0, 5).map((r) => ({
+      scientificName: r.taxon.name,
+      commonName: r.taxon.preferred_common_name ?? null,
+      iconicTaxon: r.taxon.iconic_taxon_name ?? 'Unknown',
+      wikiUrl: r.taxon.wikipedia_url ?? null,
+      score: r.combined_score,
+      photoUrl: r.taxon.default_photo?.medium_url ?? null,
+    }));
+
+    if (results.length > 0) {
+      await this.assetRepository.upsertMetadata(id, [{ key: AssetMetadataKey.Species, value: results[0] }]);
+    }
+
+    return { results };
   }
 
   async upsertBulkMetadata(auth: AuthDto, dto: AssetMetadataBulkUpsertDto): Promise<AssetMetadataBulkResponseDto[]> {

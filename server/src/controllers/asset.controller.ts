@@ -21,6 +21,7 @@ import {
 } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { AssetEditsCreateDto, AssetEditsResponseDto } from 'src/dtos/editing.dto';
+import { IdentifyResponseDto } from 'src/dtos/identify.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import { ApiTag, Permission, RouteKey } from 'src/enum';
 import { Auth, Authenticated } from 'src/middleware/auth.guard';
@@ -185,6 +186,17 @@ export class AssetController {
   })
   getAssetOcr(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<AssetOcrResponseDto[]> {
     return this.service.getOcr(auth, id);
+  }
+
+  @Post(':id/identify')
+  @Authenticated({ permission: Permission.AssetRead })
+  @Endpoint({
+    summary: 'Identify subject in asset',
+    description: 'Use iNaturalist to identify plants, animals, birds, and other organisms in an image. Returns up to 5 candidate taxa with Wikipedia links. Stores the top result in asset metadata.',
+    history: new HistoryBuilder().added('v1').beta('v1'),
+  })
+  identifyAssetSubject(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<IdentifyResponseDto> {
+    return this.service.identifySubject(auth, id);
   }
 
   @Put(':id/metadata')

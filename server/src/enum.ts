@@ -333,6 +333,7 @@ export enum UserMetadataKey {
 
 export enum AssetMetadataKey {
   MobileApp = 'mobile-app',
+  Species = 'species',
 }
 
 export enum UserAvatarColor {
