@@ -17,6 +17,7 @@ import {
   AssetTypeEnum,
   AssetVisibility,
   getAssetInfo,
+  identifyAssetSubject,
   runAssetJobs,
   updateAsset,
   type AssetJobsDto,
@@ -36,6 +37,7 @@ import {
   mdiHeartOutline,
   mdiImageRefreshOutline,
   mdiInformationOutline,
+  mdiLeaf,
   mdiMagnifyMinusOutline,
   mdiMagnifyPlusOutline,
   mdiMotionPauseOutline,
@@ -90,7 +92,29 @@ export const getAssetBulkActions = ($t: MessageFormatter) => {
     $if: () => isAllVideos,
   };
 
-  return { AddToAlbum, RefreshFacesJob, RefreshMetadataJob, RegenerateThumbnailJob, TranscodeVideoJob };
+  const IdentifySubjectsJob: ActionItem = {
+    title: 'Identify subjects',
+    icon: mdiLeaf,
+    $if: () => !isAllVideos,
+    onAction: async () => {
+      const ids = ownedAssets.filter((a) => !a.isVideo).map((a) => a.id);
+      const toast = toastManager.loading(`Identifying subjects in 0 / ${ids.length} photos…`);
+      let done = 0;
+      for (const id of ids) {
+        try {
+          await identifyAssetSubject({ id });
+        } catch {
+          // skip failures silently — bad token etc will show on next open
+        }
+        done++;
+        toast.update({ type: 'loading', message: `Identifying subjects in ${done} / ${ids.length} photos…` });
+      }
+      toast.update({ type: 'success', message: `Identified subjects in ${done} photo${done === 1 ? '' : 's'}` });
+      assetMultiSelectManager.clear();
+    },
+  };
+
+  return { AddToAlbum, RefreshFacesJob, RefreshMetadataJob, RegenerateThumbnailJob, TranscodeVideoJob, IdentifySubjectsJob };
 };
 
 export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto) => {
