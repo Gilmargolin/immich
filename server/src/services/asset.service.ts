@@ -98,7 +98,7 @@ export class AssetService extends BaseService {
         this.inatTokenExpiry = expiry;
         return this.inatToken;
       }
-      throw new BadRequestException('INAT_API_TOKEN has expired. Set INAT_CLIENT_ID + INAT_CLIENT_SECRET + INAT_USERNAME + INAT_PASSWORD for automatic refresh, or update INAT_API_TOKEN.');
+      throw new BadRequestException('iNaturalist token expired. Run ~/Cursor/inat-refresh.sh on your Mac to get a new one.');
     }
 
     throw new BadRequestException('iNaturalist not configured. Set INAT_CLIENT_ID, INAT_CLIENT_SECRET, INAT_USERNAME, and INAT_PASSWORD in the server environment.');
