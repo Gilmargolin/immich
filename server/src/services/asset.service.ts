@@ -62,14 +62,17 @@ export class AssetService extends BaseService {
       return this.inatToken;
     }
 
-    const email = process.env.INAT_EMAIL;
+    const login = process.env.INAT_EMAIL ?? process.env.INAT_USERNAME;
     const password = process.env.INAT_PASSWORD;
-    if (!email || !password) {
-      throw new BadRequestException('INAT_EMAIL and INAT_PASSWORD must be set in the server environment');
+    if (!login || !password) {
+      throw new BadRequestException('INAT_EMAIL (or INAT_USERNAME) and INAT_PASSWORD must be set in the server environment');
     }
 
     const response = await fetch('https://www.inaturalist.org/users/api_token', {
-      headers: { Authorization: `Basic ${Buffer.from(`${email}:${password}`).toString('base64')}` },
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${login}:${password}`).toString('base64')}`,
+        Accept: 'application/json',
+      },
     });
 
     if (!response.ok) {
