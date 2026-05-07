@@ -57,33 +57,51 @@ export class AssetService extends BaseService {
   private inatToken: string | null = null;
   private inatTokenExpiry = 0;
 
+  private inatJwtExpiry(jwt: string): number {
+    const payload = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url').toString()) as { exp: number };
+    return payload.exp * 1000;
+  }
+
   private async getInatToken(): Promise<string> {
     if (this.inatToken && Date.now() < this.inatTokenExpiry - 60_000) {
       return this.inatToken;
     }
 
-    const login = process.env.INAT_EMAIL ?? process.env.INAT_USERNAME;
+    // Path 1: OAuth ROPC with app credentials (preferred — auto-refreshes forever)
+    const clientId = process.env.INAT_CLIENT_ID;
+    const clientSecret = process.env.INAT_CLIENT_SECRET;
+    const login = process.env.INAT_USERNAME ?? process.env.INAT_EMAIL;
     const password = process.env.INAT_PASSWORD;
-    if (!login || !password) {
-      throw new BadRequestException('INAT_EMAIL (or INAT_USERNAME) and INAT_PASSWORD must be set in the server environment');
+
+    if (clientId && clientSecret && login && password) {
+      const body = new URLSearchParams({ grant_type: 'password', client_id: clientId, client_secret: clientSecret, username: login, password });
+      const oauthResp = await fetch('https://www.inaturalist.org/oauth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body,
+      });
+      if (oauthResp.ok) {
+        const { access_token } = (await oauthResp.json()) as { access_token: string };
+        // OAuth tokens from iNaturalist don't expire — cache for 23 h to be safe
+        this.inatToken = access_token;
+        this.inatTokenExpiry = Date.now() + 23 * 60 * 60 * 1000;
+        return this.inatToken;
+      }
     }
 
-    const response = await fetch('https://www.inaturalist.org/users/api_token', {
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${login}:${password}`).toString('base64')}`,
-        Accept: 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new BadRequestException(`Failed to authenticate with iNaturalist: ${response.status}`);
+    // Path 2: Static JWT in env (set INAT_API_TOKEN; expires every 24 h)
+    const staticToken = process.env.INAT_API_TOKEN;
+    if (staticToken) {
+      const expiry = this.inatJwtExpiry(staticToken);
+      if (Date.now() < expiry - 60_000) {
+        this.inatToken = staticToken;
+        this.inatTokenExpiry = expiry;
+        return this.inatToken;
+      }
+      throw new BadRequestException('INAT_API_TOKEN has expired. Set INAT_CLIENT_ID + INAT_CLIENT_SECRET + INAT_USERNAME + INAT_PASSWORD for automatic refresh, or update INAT_API_TOKEN.');
     }
 
-    const { api_token } = (await response.json()) as { api_token: string };
-    const payload = JSON.parse(Buffer.from(api_token.split('.')[1], 'base64url').toString()) as { exp: number };
-    this.inatToken = api_token;
-    this.inatTokenExpiry = payload.exp * 1000;
-    return this.inatToken;
+    throw new BadRequestException('iNaturalist not configured. Set INAT_CLIENT_ID, INAT_CLIENT_SECRET, INAT_USERNAME, and INAT_PASSWORD in the server environment.');
   }
 
   async getStatistics(auth: AuthDto, dto: AssetStatsDto) {
