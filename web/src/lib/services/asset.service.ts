@@ -98,18 +98,18 @@ export const getAssetBulkActions = ($t: MessageFormatter) => {
     $if: () => !isAllVideos,
     onAction: async () => {
       const ids = ownedAssets.filter((a) => !a.isVideo).map((a) => a.id);
-      const toast = toastManager.loading(`Identifying subjects in 0 / ${ids.length} photos…`);
+      if (ids.length === 0) return;
+      toastManager.info(`Identifying subjects in ${ids.length} photo${ids.length === 1 ? '' : 's'}…`);
       let done = 0;
       for (const id of ids) {
         try {
           await identifyAssetSubject({ id });
+          done++;
         } catch {
-          // skip failures silently — bad token etc will show on next open
+          // individual failures are shown when user opens that photo
         }
-        done++;
-        toast.update({ type: 'loading', message: `Identifying subjects in ${done} / ${ids.length} photos…` });
       }
-      toast.update({ type: 'success', message: `Identified subjects in ${done} photo${done === 1 ? '' : 's'}` });
+      toastManager.success(`Identified subjects in ${done} / ${ids.length} photo${ids.length === 1 ? '' : 's'}`);
       assetMultiSelectManager.clear();
     },
   };

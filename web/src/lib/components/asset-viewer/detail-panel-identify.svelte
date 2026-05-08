@@ -40,10 +40,16 @@
   const formatScore = (score: number) =>
     `${Math.min(100, Math.round(score > 1 ? score : score * 100))}%`;
 
-  // Load saved species on mount
+  // Reset and reload whenever the asset changes
   $effect(() => {
-    getAssetMetadataByKey({ id: asset.id, key: 'species' })
+    const id = asset.id;
+    results = [];
+    ran = false;
+    selectedIndex = 0;
+
+    getAssetMetadataByKey({ id, key: 'species' })
       .then((meta) => {
+        if (asset.id !== id) return; // navigated away while fetching
         const saved = meta.value as unknown as IdentifyResultDto;
         if (saved?.scientificName) {
           results = [saved];
@@ -51,9 +57,7 @@
           ran = true;
         }
       })
-      .catch(() => {
-        // no saved species yet — that's fine
-      });
+      .catch(() => {});
   });
 
   const saveSelection = async (index: number) => {
