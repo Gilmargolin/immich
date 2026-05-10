@@ -31,8 +31,8 @@ void main() {
 //   u_maskGeomB[i]       : linear → (mid, _, _, _)
 //                          radial → (angleDeg, feather, invert?1:0, mid)
 //                          brush  → unused
-//   u_maskGeomC[i]       : (lumLow, lumHigh, _, _) — luminance gate, all kinds.
-//                          Defaults (0, 1) ⇒ identity (no behavior change).
+//   u_maskGeomC[i]       : (lumLow, lumHigh, lumFeather, _) — luminance gate, all kinds.
+//                          lumFeather defaults to 0.05 (5% transition width).
 //   u_maskSliders0[i]    : (brightness, contrast, saturation, warmth)
 //   u_maskSliders1[i]    : (tint, highlights, shadows, whitePoint)
 //   u_maskBlackPoint[i]  : blackPoint
@@ -92,12 +92,12 @@ float smoothStepF(float edge0, float edge1, float x) {
 }
 
 // Smooth in-band/out-of-band gate on Rec.709 linear luminance. Mirrors
-// lumKey() in adjust-math.ts and media.repository.ts. Fixed feather band
-// LUM_BAND on each side. Defaults (0, 1) ⇒ identity.
-const float LUM_BAND = 0.05;
-float lumKey(float y, float lo, float hi) {
-  float inLow = smoothStepF(lo - LUM_BAND, lo, y);
-  float inHigh = 1.0 - smoothStepF(hi, hi + LUM_BAND, y);
+// lumKey() in adjust-math.ts and media.repository.ts. Feather band is
+// parameterized; defaults (0, 1) ⇒ identity.
+float lumKey(float y, float lo, float hi, float feather) {
+  float f = max(0.001, feather);
+  float inLow = smoothStepF(lo - f, lo, y);
+  float inHigh = 1.0 - smoothStepF(hi, hi + f, y);
   return inLow * inHigh;
 }
 
@@ -226,7 +226,7 @@ float maskWeight(int idx, vec2 px) {
   // from 1 to 0, measured in fractions of the semi-axis. The mid param
   // biases where weight=0.5 lands inside that band (piecewise-linear remap
   // before the cubic smoothstep, matching the linear mask).
-  float featherSpan = max(0.001, feather);
+  float featherSpan = max(0.001, feather / 100.0);
   float t = clamp((dist - 1.0) / featherSpan, 0.0, 1.0);
   float r = (t <= rmid) ? (t * 0.5 / rmid) : (0.5 + (t - rmid) * 0.5 / (1.0 - rmid));
   float w = 1.0 - r * r * (3.0 - 2.0 * r);
@@ -264,7 +264,8 @@ void main() {
         // Sample luminance from the current linear-light RGB (after global +
         // any earlier masks) so the gate responds to "what's there now".
         float yLin = clamp(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
-        w *= lumKey(yLin, lumLow, lumHigh);
+        float lumFeather = u_maskGeomC[i].z;
+        w *= lumKey(yLin, lumLow, lumHigh, lumFeather > 0.0 ? lumFeather : 0.05);
       }
     }
     if (w > 0.0) {

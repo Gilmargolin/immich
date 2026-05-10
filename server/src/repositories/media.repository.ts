@@ -219,21 +219,22 @@ type PrecomputedMask = {
   sliders: PrecomputedSliders;
   weight: (x: number, y: number) => number;
   // Optional luminance gate. When active, the spatial weight is multiplied by
-  // lumKey(linear-luminance, lumLow, lumHigh). hasLumGate=false means the gate
-  // is the identity (1) — so existing masks (no lumLow/lumHigh) are byte-
-  // identical to the pre-feature behavior.
+  // lumKey(linear-luminance, lumLow, lumHigh, lumFeather). hasLumGate=false
+  // means the gate is the identity (1) — so existing masks (no lumLow/lumHigh)
+  // are byte-identical to the pre-feature behavior.
   hasLumGate: boolean;
   lumLow: number;
   lumHigh: number;
+  lumFeather: number;
 };
 
 // Smooth in-band/out-of-band gate on Rec.709 linear luminance. Returns 1
-// inside [lo, hi], smoothly drops to 0 over a fixed feather band of LUM_BAND
+// inside [lo, hi], smoothly drops to 0 over a feather band of `feather`
 // on each side. Mirrored byte-for-byte in adjust-math.ts and adjust-shader.ts.
-const LUM_BAND = 0.05;
-const lumKey = (y: number, lo: number, hi: number): number => {
-  const inLow = smoothstep(lo - LUM_BAND, lo, y);
-  const inHigh = 1 - smoothstep(hi, hi + LUM_BAND, y);
+const lumKey = (y: number, lo: number, hi: number, feather = 0.05): number => {
+  const f = Math.max(0.001, feather);
+  const inLow = smoothstep(lo - f, lo, y);
+  const inHigh = 1 - smoothstep(hi, hi + f, y);
   return inLow * inHigh;
 };
 
@@ -307,12 +308,13 @@ const precomputeMask = (
   const sliders = precomputeSliders(mask.params);
   const lumLow = mask.lumLow ?? 0;
   const lumHigh = mask.lumHigh ?? 1;
+  const lumFeather = mask.lumFeather ?? 0.05;
   const hasLumGate = isLumGateActive(lumLow, lumHigh);
 
   if (mask.kind === LocalMaskKind.Brush) {
     // No buffer (decoder failed or not painted yet) → contribute nothing.
     if (!decodedBrushBuffer) {
-      return { sliders, weight: () => 0, hasLumGate, lumLow, lumHigh };
+      return { sliders, weight: () => 0, hasLumGate, lumLow, lumHigh, lumFeather };
     }
     const buffer = decodedBrushBuffer;
     const mw = BRUSH_MASK_RESOLUTION;
@@ -328,6 +330,7 @@ const precomputeMask = (
       hasLumGate,
       lumLow,
       lumHigh,
+      lumFeather,
       weight: (x, y) => bilinearSampleBrush(buffer, mw, mh, x * invW, y * invH),
     };
   }
@@ -341,7 +344,7 @@ const precomputeMask = (
     const vy = by - ay;
     const lenSq = vx * vx + vy * vy;
     if (lenSq < 1e-6) {
-      return { sliders, weight: () => 0, hasLumGate, lumLow, lumHigh };
+      return { sliders, weight: () => 0, hasLumGate, lumLow, lumHigh, lumFeather };
     }
     const nx = vx / lenSq;
     const ny = vy / lenSq;
@@ -356,6 +359,7 @@ const precomputeMask = (
       hasLumGate,
       lumLow,
       lumHigh,
+      lumFeather,
       weight: (x, y) => {
         const t = (x - ax) * nx + (y - ay) * ny;
         const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -380,7 +384,7 @@ const precomputeMask = (
   //   feather = 0   → sharp edge at the ellipse boundary
   //   feather = 1   → halo extends one full radius past the ellipse
   const featherStart = 1;
-  const featherSpan = Math.max(0.001, mask.feather);
+  const featherSpan = Math.max(0.001, mask.feather / 100);
   const featherEnd = 1 + featherSpan;
   const invert = mask.invert;
   // `mid` biases where weight = 0.5 lands within the falloff band. Same
@@ -394,6 +398,7 @@ const precomputeMask = (
     hasLumGate,
     lumLow,
     lumHigh,
+    lumFeather,
     weight: (x, y) => {
       const dx = x - cx;
       const dy = y - cy;
@@ -475,7 +480,7 @@ const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters)
         // any earlier masks) so the gate responds to "what's there now".
         const yLin = 0.2126 * r + 0.7152 * g + 0.0722 * b;
         const yClamped = yLin < 0 ? 0 : yLin > 1 ? 1 : yLin;
-        w *= lumKey(yClamped, mask.lumLow, mask.lumHigh);
+        w *= lumKey(yClamped, mask.lumLow, mask.lumHigh, mask.lumFeather);
       }
       if (w > 0) {
         const adj = applyPrecomputedSliders(r, g, b, mask.sliders);

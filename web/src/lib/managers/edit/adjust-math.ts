@@ -47,13 +47,13 @@ export const smoothstep = (edge0: number, edge1: number, x: number): number => {
 };
 
 // Smooth in-band/out-of-band gate on Rec.709 linear luminance. Returns 1
-// inside [lo, hi], smoothly drops to 0 over a fixed feather band of LUM_BAND
+// inside [lo, hi], smoothly drops to 0 over a feather band of `feather`
 // on each side. Mirrored byte-for-byte in
 // server/src/repositories/media.repository.ts and adjust-shader.ts.
-export const LUM_BAND = 0.05;
-export const lumKey = (y: number, lo: number, hi: number): number => {
-  const inLow = smoothstep(lo - LUM_BAND, lo, y);
-  const inHigh = 1 - smoothstep(hi, hi + LUM_BAND, y);
+export const lumKey = (y: number, lo: number, hi: number, feather = 0.05): number => {
+  const f = Math.max(0.001, feather);
+  const inLow = smoothstep(lo - f, lo, y);
+  const inHigh = 1 - smoothstep(hi, hi + f, y);
   return inLow * inHigh;
 };
 
@@ -228,7 +228,7 @@ export const maskWeight = (
   // is the width of the outer halo where weight transitions from 1 to 0,
   // measured in fractions of the semi-axis. `mid` biases where weight=0.5
   // lands within the falloff band — same piecewise-linear remap as linear.
-  const featherSpan = Math.max(0.001, mask.feather);
+  const featherSpan = Math.max(0.001, mask.feather / 100);
   const tRaw = (d - 1) / featherSpan;
   const t = tRaw < 0 ? 0 : tRaw > 1 ? 1 : tRaw;
   const mid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5));
@@ -277,7 +277,7 @@ export const applyAdjustToPixel = (
         // any earlier masks) so the gate responds to "what's there now".
         const yLin = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
         const yClamped = yLin < 0 ? 0 : yLin > 1 ? 1 : yLin;
-        w *= lumKey(yClamped, lumLow, lumHigh);
+        w *= lumKey(yClamped, lumLow, lumHigh, mask.lumFeather ?? 0.05);
       }
     }
     if (w > 0) {

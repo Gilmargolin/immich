@@ -63,7 +63,7 @@ const defaultRadialMask = (): LocalMask => ({
   rx: 0.25,
   ry: 0.25,
   angle: 0,
-  feather: 0.2,
+  feather: 20,
   invert: false,
   lumLow: 0,
   lumHigh: 1,
@@ -92,6 +92,8 @@ const emptyBrushMaskDataUrl = (): string => {
 export const defaultBrushMask = (): LocalMask => ({
   kind: 'brush',
   mask: emptyBrushMaskDataUrl(),
+  lumLow: 0,
+  lumHigh: 1,
   params: { ...defaultValues },
 });
 
@@ -358,7 +360,7 @@ export class AdjustManager implements EditToolManager {
       rx: Math.max(0.02, rx),
       ry: Math.max(0.02, ry),
       angle: 0,
-      feather: 0.2,
+      feather: 20,
       invert: false,
       lumLow: 0,
       lumHigh: 1,
@@ -395,6 +397,13 @@ export class AdjustManager implements EditToolManager {
     const orderedHi = Math.max(lo, hi);
     this.masks = this.masks.map((m, i) =>
       i === index ? ({ ...m, lumLow: orderedLo, lumHigh: orderedHi } as LocalMask) : m,
+    );
+  }
+
+  setLumFeather(index: number, feather: number): void {
+    const f = Math.min(0.5, Math.max(0.01, feather));
+    this.masks = this.masks.map((m, i) =>
+      i === index ? ({ ...m, lumFeather: f } as LocalMask) : m,
     );
   }
 

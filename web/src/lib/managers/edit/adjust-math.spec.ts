@@ -170,7 +170,7 @@ describe('applyAdjustToPixel — local masks', () => {
       rx: 0.25,
       ry: 0.25,
       angle: 0,
-      feather: 0.1,
+      feather: 10,
       invert: false,
       params: { ...ZERO, brightness: -1 },
     };
@@ -190,7 +190,7 @@ describe('applyAdjustToPixel — local masks', () => {
       rx: 0.25,
       ry: 0.25,
       angle: 0,
-      feather: 0.1,
+      feather: 10,
       invert: true,
       params: { ...ZERO, brightness: -1 },
     };
@@ -211,7 +211,7 @@ describe('applyAdjustToPixel — local masks', () => {
         rx: 0.3,
         ry: 0.3,
         angle: 0,
-        feather: 0.05,
+        feather: 5,
         invert: false,
         params: { ...ZERO, brightness: -0.5 },
       },
@@ -222,7 +222,7 @@ describe('applyAdjustToPixel — local masks', () => {
         rx: 0.3,
         ry: 0.3,
         angle: 0,
-        feather: 0.05,
+        feather: 5,
         invert: false,
         params: { ...ZERO, brightness: 1 },
       },
@@ -276,7 +276,7 @@ describe('applyAdjustToPixel — local masks', () => {
       rx: 0.3,
       ry: 0.3,
       angle: 0,
-      feather: 0.1,
+      feather: 10,
       invert: false,
       params: { ...ZERO },
     };
@@ -298,7 +298,7 @@ describe('applyAdjustToPixel — local masks', () => {
       rx: 0.5,
       ry: 0.5,
       angle: 0,
-      feather: 0.05,
+      feather: 5,
       invert: false,
       lumLow: 0.5,
       lumHigh: 1,
@@ -319,7 +319,7 @@ describe('applyAdjustToPixel — local masks', () => {
       rx: 0.5,
       ry: 0.5,
       angle: 0,
-      feather: 0.05,
+      feather: 5,
       invert: false,
       lumLow: 0.5,
       lumHigh: 1,
@@ -327,5 +327,84 @@ describe('applyAdjustToPixel — local masks', () => {
     };
     const bright = applyAt([230, 230, 230], {}, [mask], 100, 100, 50, 50);
     expect(bright.r).toBeGreaterThan(250);
+  });
+
+  // Radial feather /100 fix: feather is stored as 0–100 (% of radius).
+  it('feather=0 radial: sharp edge — pixel just outside ellipse has weight≈0', () => {
+    // Ellipse: center (50,50), radius 20px (rx=ry=0.2 of minDim=100).
+    // feather=0 → featherSpan=0.001 → effectively sharp. A pixel at d≈1.05
+    // should have weight~0.
+    const mask: LocalMask = {
+      kind: 'radial',
+      cx: 0.5,
+      cy: 0.5,
+      rx: 0.2,
+      ry: 0.2,
+      angle: 0,
+      feather: 0,
+      invert: false,
+      params: { ...ZERO, brightness: -1 },
+    };
+    // Pixel at (72, 50): dx=22, d = 22/20 = 1.1 — just outside, sharp edge → weight≈0.
+    const outside = applyAt([180, 180, 180], {}, [mask], 100, 100, 72, 50);
+    // Pixel at (50, 50): center → fully inside → weight=1, full effect.
+    const inside = applyAt([180, 180, 180], {}, [mask], 100, 100, 50, 50);
+    expect(outside.r).toBeGreaterThan(170); // barely affected
+    expect(inside.r).toBeLessThan(120); // fully darkened
+  });
+
+  it('feather=100 radial: full-radius soft zone — pixel 1 radius outside has weight≈0.5', () => {
+    // feather=100 → featherSpan=1.0 → halo spans one full radius.
+    // At d=1.5 (half way through the feather band), tRaw=(1.5-1)/1=0.5, mid=0.5,
+    // r=0.5, smoothstep(0.5)=0.5 → w≈0.5.
+    const mask: LocalMask = {
+      kind: 'radial',
+      cx: 0.5,
+      cy: 0.5,
+      rx: 0.2,
+      ry: 0.2,
+      angle: 0,
+      feather: 100,
+      invert: false,
+      params: { ...ZERO, brightness: -1 },
+    };
+    // d=1.5: pixel at 50+20*1.5=80px from center along x. (80,50) in a 100×100 image.
+    const midFeather = applyAt([180, 180, 180], {}, [mask], 100, 100, 80, 50);
+    // weight≈0.5, so output should be between the unaffected value (180) and the
+    // fully darkened value (~95). Expect roughly midway.
+    expect(midFeather.r).toBeLessThan(175);
+    expect(midFeather.r).toBeGreaterThan(95);
+  });
+
+  it('lumFeather=0.2: wider luminance transition gives partial effect at boundary', () => {
+    // lumLow=0.5, lumHigh=1, lumFeather=0.2. The feather band on the low side
+    // runs from 0.5-0.2=0.3 to 0.5. A pixel with linear luminance≈0.40
+    // (sRGB 170) is midway through the band → gate≈0.52 → partial effect.
+    // With default feather=0.05, the band is 0.45–0.50 and lum=0.40 is outside
+    // it → gate≈0 → pixel unchanged. lumFeather=0.2 makes it partially active.
+    const mask: LocalMask = {
+      kind: 'radial',
+      cx: 0.5,
+      cy: 0.5,
+      rx: 0.5,
+      ry: 0.5,
+      angle: 0,
+      feather: 5,
+      invert: false,
+      lumLow: 0.5,
+      lumHigh: 1,
+      lumFeather: 0.2,
+      // Use brightness=0.3 (×1.52 in linear) so the blended output doesn't
+      // clip to 255 — expected ~184, clearly between 170 (no gate) and the
+      // fully-gated value (~190 linear).
+      params: { ...ZERO, brightness: 0.3 },
+    };
+    // Without lumFeather override the gate is ~0 for lum=0.40 → unchanged.
+    // With lumFeather=0.2 the gate is ~0.52 → output is noticeably brightened.
+    const out = applyAt([170, 170, 170], {}, [mask], 100, 100, 50, 50);
+    // Should be partially brightened — above baseline 170 but below the
+    // fully-gated output (~190).
+    expect(out.r).toBeGreaterThan(173);
+    expect(out.r).toBeLessThan(200);
   });
 });

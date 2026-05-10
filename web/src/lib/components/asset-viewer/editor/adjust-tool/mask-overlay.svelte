@@ -365,6 +365,16 @@
     }
   };
 
+  // ---------- Escape key cancels draw mode ----------
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && adjustManager.pendingMaskKind) {
+      drawStart = null;
+      drawCurrent = null;
+      adjustManager.cancelDrawingMask();
+    }
+  };
+
   // ---------- Background click deselects (idle mode only) ----------
 
   let suppressNextSvgClick = false;
@@ -487,7 +497,14 @@
   });
 </script>
 
+<svelte:window onkeydown={onKeyDown} />
+
 <div class="pointer-events-none absolute inset-0">
+  {#if pendingKind && pendingKind !== 'brush'}
+    <div class="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-black/70 px-3 py-1 text-xs text-white whitespace-nowrap">
+      Click and drag to draw {pendingKind} mask · Esc to cancel
+    </div>
+  {/if}
   <svg
     bind:this={svg}
     class="absolute inset-0 h-full w-full pointer-events-auto"
@@ -862,39 +879,70 @@
 
     <!-- Draw-mode preview shape (while user is dragging) -->
     {#if previewLinear}
+      {@const lp = previewLinear}
+      {@const ldx = lp.bx - lp.ax}
+      {@const ldy = lp.by - lp.ay}
+      {@const llen = Math.hypot(ldx, ldy)}
+      {@const lext = Math.max(svgWidth, svgHeight) * 2}
+      <!-- Semi-transparent red gradient overlay along drag direction -->
+      <defs>
+        <linearGradient id="preview-linear-grad" x1={lp.ax} y1={lp.ay} x2={lp.bx} y2={lp.by} gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="#ef4444" stop-opacity="0.25" />
+          <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width={svgWidth} height={svgHeight} fill="url(#preview-linear-grad)" pointer-events="none" />
+      <!-- Perpendicular guide lines at start (full effect) and current (zero effect) -->
+      {#if llen > 1}
+        {@const pnx = -ldy / llen}
+        {@const pny = ldx / llen}
+        <line
+          x1={lp.ax - pnx * lext} y1={lp.ay - pny * lext}
+          x2={lp.ax + pnx * lext} y2={lp.ay + pny * lext}
+          stroke="white" stroke-width="1.5" stroke-dasharray="4 4" stroke-opacity="0.8"
+          style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8))"
+          pointer-events="none"
+        />
+        <line
+          x1={lp.bx - pnx * lext} y1={lp.by - pny * lext}
+          x2={lp.bx + pnx * lext} y2={lp.by + pny * lext}
+          stroke="white" stroke-width="1.5" stroke-dasharray="4 4" stroke-opacity="0.5"
+          style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8))"
+          pointer-events="none"
+        />
+      {/if}
+      <!-- Main axis line from start to current -->
       <line
-        x1={previewLinear.ax}
-        y1={previewLinear.ay}
-        x2={previewLinear.bx}
-        y2={previewLinear.by}
-        stroke="#0ea5e9"
-        stroke-width="2"
+        x1={lp.ax} y1={lp.ay} x2={lp.bx} y2={lp.by}
+        stroke="white" stroke-width="2" stroke-dasharray="4 4"
+        style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8))"
         pointer-events="none"
       />
-      <circle cx={previewLinear.ax} cy={previewLinear.ay} r="6" fill="#0ea5e9" pointer-events="none" />
-      <circle
-        cx={previewLinear.bx}
-        cy={previewLinear.by}
-        r="6"
-        fill="white"
-        stroke="#0ea5e9"
-        stroke-width="2"
-        pointer-events="none"
-      />
+      <!-- Point A marker (full effect) -->
+      <circle cx={lp.ax} cy={lp.ay} r="6" fill="#3b82f6" stroke="white" stroke-width="2" pointer-events="none" />
+      <!-- Point B marker (zero effect) -->
+      <circle cx={lp.bx} cy={lp.by} r="6" fill="transparent" stroke="white" stroke-width="2" pointer-events="none" />
     {/if}
 
     {#if previewRadial}
+      {@const pr = previewRadial}
+      <!-- Main ellipse with dashed stroke -->
       <ellipse
-        cx={previewRadial.cx}
-        cy={previewRadial.cy}
-        rx={previewRadial.rx}
-        ry={previewRadial.ry}
-        fill="rgba(14, 165, 233, 0.1)"
-        stroke="#0ea5e9"
-        stroke-width="2"
+        cx={pr.cx} cy={pr.cy} rx={pr.rx} ry={pr.ry}
+        fill="rgba(239,68,68,0.1)"
+        stroke="white" stroke-width="2" stroke-dasharray="6 3"
+        style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8))"
         pointer-events="none"
       />
-      <circle cx={previewRadial.cx} cy={previewRadial.cy} r="6" fill="#0ea5e9" pointer-events="none" />
+      <!-- Feather halo (default feather ≈ 20 → 1.2× radius) -->
+      <ellipse
+        cx={pr.cx} cy={pr.cy} rx={pr.rx * 1.2} ry={pr.ry * 1.2}
+        fill="none"
+        stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="3 3"
+        pointer-events="none"
+      />
+      <!-- Center dot -->
+      <circle cx={pr.cx} cy={pr.cy} r="4" fill="#3b82f6" stroke="white" stroke-width="1.5" pointer-events="none" />
     {/if}
 
     <!-- Draw-mode hint (shown before the user clicks). Brush mode owns its

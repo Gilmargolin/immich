@@ -36,7 +36,7 @@
   }
   let { maskIndex, readonly = false }: Props = $props();
 
-  const HARDNESS = 0.3;
+  let hardness = $state(0.5);
 
   let brushSize = $state(50);
   let cursorX = $state<number | null>(null);
@@ -203,7 +203,7 @@
     }
     // Soft-edged paint: hard inner 30%, smooth fade to the edge. Use 'lighter'
     // so strokes accumulate up to fully opaque (matches Lightroom behavior).
-    const grad = offscreenCtx.createRadialGradient(x, y, r * HARDNESS, x, y, r);
+    const grad = offscreenCtx.createRadialGradient(x, y, r * hardness, x, y, r);
     grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
     grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     offscreenCtx.save();
@@ -358,6 +358,11 @@
         <input type="range" min="1" max="200" bind:value={brushSize} class="w-32" />
         <span class="tabular-nums">{brushSize}px</span>
         <span class="ms-2 text-gray-300">Alt or right-click to erase</span>
+      </label>
+      <label class="flex items-center gap-2">
+        Hardness
+        <input type="range" min="0" max="0.99" step="0.01" bind:value={hardness} class="w-24" />
+        <span class="tabular-nums">{Math.round(hardness * 100)}%</span>
       </label>
     </div>
   {/if}

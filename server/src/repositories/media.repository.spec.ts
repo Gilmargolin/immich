@@ -648,7 +648,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.25,
                 ry: 0.25,
                 angle: 0,
-                feather: 0.1,
+                feather: 10,
                 invert: false,
                 params: { ...defaultAdjust, brightness: -1 },
               },
@@ -684,7 +684,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.3,
                 ry: 0.3,
                 angle: 0,
-                feather: 0.05,
+                feather: 5,
                 invert: false,
                 params: { ...defaultAdjust, brightness: -0.5 },
               },
@@ -707,7 +707,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.3,
                 ry: 0.3,
                 angle: 0,
-                feather: 0.05,
+                feather: 5,
                 invert: false,
                 params: { ...defaultAdjust, brightness: -0.5 },
               },
@@ -718,7 +718,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.3,
                 ry: 0.3,
                 angle: 0,
-                feather: 0.05,
+                feather: 5,
                 invert: false,
                 params: { ...defaultAdjust, brightness: 1 },
               },
@@ -749,7 +749,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.3,
                 ry: 0.3,
                 angle: 0,
-                feather: 0.1,
+                feather: 10,
                 invert: false,
                 params: { ...defaultAdjust },
               },
@@ -784,7 +784,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.5,
                 ry: 0.5,
                 angle: 0,
-                feather: 0.05,
+                feather: 5,
                 invert: false,
                 lumLow: 0.5,
                 lumHigh: 1,
@@ -817,7 +817,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.5,
                 ry: 0.5,
                 angle: 0,
-                feather: 0.05,
+                feather: 5,
                 invert: false,
                 lumLow: 0.5,
                 lumHigh: 1,
@@ -915,7 +915,7 @@ describe(MediaRepository.name, () => {
                 rx: 0.25,
                 ry: 0.25,
                 angle: 0,
-                feather: 0.1,
+                feather: 10,
                 invert: true,
                 params: { ...defaultAdjust, brightness: -1 },
               },
@@ -929,6 +929,75 @@ describe(MediaRepository.name, () => {
       const corner = await getPixelColor(buffer, 5, 5);
       expect(center.r).toBeGreaterThan(170);
       expect(corner.r).toBeLessThan(120);
+    });
+
+    // Radial feather /100 fix: feather is stored as 0–100 (% of radius).
+    it('feather=0 radial: sharp edge — pixel just outside ellipse has weight≈0', async () => {
+      // Ellipse: center (50,50), radius 20px (rx=ry=0.2 of minDim=100).
+      // feather=0 → featherSpan=0.001 → effectively sharp. Pixel at d≈1.1 → weight≈0.
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.2,
+                ry: 0.2,
+                angle: 0,
+                feather: 0,
+                invert: false,
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      // Pixel at (72, 50): d=22/20=1.1 — just outside sharp edge → barely affected.
+      const outside = await getPixelColor(buffer, 72, 50);
+      // Pixel at (50, 50): center → fully darkened.
+      const inside = await getPixelColor(buffer, 50, 50);
+      expect(outside.r).toBeGreaterThan(170);
+      expect(inside.r).toBeLessThan(120);
+    });
+
+    it('feather=100 radial: full-radius soft zone — pixel 1 radius outside has weight≈0.5', async () => {
+      // feather=100 → featherSpan=1.0. At d=1.5 (pixel at x=80 for rx=20px),
+      // tRaw=0.5, mid=0.5, r=0.5, w≈0.5 → partial darkening.
+      const imageBuffer = await buildGrayImage(180);
+      const result = await sut['applyEdits'](sharp(imageBuffer), [
+        {
+          action: AssetEditAction.Adjust,
+          parameters: {
+            ...defaultAdjust,
+            masks: [
+              {
+                kind: LocalMaskKind.Radial,
+                cx: 0.5,
+                cy: 0.5,
+                rx: 0.2,
+                ry: 0.2,
+                angle: 0,
+                feather: 100,
+                invert: false,
+                params: { ...defaultAdjust, brightness: -1 },
+              },
+            ],
+          },
+        },
+      ]);
+
+      const buffer = await result.png().toBuffer();
+      // Pixel at d=1.5 (x=80): partially darkened — between 180 and ~95.
+      const midFeather = await getPixelColor(buffer, 80, 50);
+      expect(midFeather.r).toBeLessThan(175);
+      expect(midFeather.r).toBeGreaterThan(95);
     });
   });
 

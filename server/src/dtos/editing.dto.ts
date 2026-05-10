@@ -213,6 +213,18 @@ export class LinearMask {
   })
   lumHigh?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(0.5)
+  @ApiProperty({
+    required: false,
+    description:
+      'Width of the feather band on each side of the luminance gate (0.01..0.5, default 0.05). ' +
+      'Larger values produce a wider, softer transition at the lumLow and lumHigh boundaries.',
+  })
+  lumFeather?: number;
+
   @ValidateNested()
   @Type(() => AdjustmentSliders)
   @ApiProperty({ description: 'Adjustments to apply where this mask has weight > 0' })
@@ -308,6 +320,18 @@ export class RadialMask {
   })
   lumHigh?: number;
 
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(0.5)
+  @ApiProperty({
+    required: false,
+    description:
+      'Width of the feather band on each side of the luminance gate (0.01..0.5, default 0.05). ' +
+      'Larger values produce a wider, softer transition at the lumLow and lumHigh boundaries.',
+  })
+  lumFeather?: number;
+
   @ValidateNested()
   @Type(() => AdjustmentSliders)
   @ApiProperty({ description: 'Adjustments to apply where this mask has weight > 0' })
@@ -365,6 +389,18 @@ export class BrushMask {
     description: 'Luminance gate upper bound (0..1, default 1). Must satisfy lumLow ≤ lumHigh.',
   })
   lumHigh?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  @Max(0.5)
+  @ApiProperty({
+    required: false,
+    description:
+      'Width of the feather band on each side of the luminance gate (0.01..0.5, default 0.05). ' +
+      'Larger values produce a wider, softer transition at the lumLow and lumHigh boundaries.',
+  })
+  lumFeather?: number;
 
   @ValidateNested()
   @Type(() => AdjustmentSliders)

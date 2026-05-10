@@ -20,6 +20,7 @@ export interface AdjustmentSliders {
 export interface LumGate {
   lumLow?: number; // [0, 1], default 0
   lumHigh?: number; // [0, 1], default 1, must be ≥ lumLow
+  lumFeather?: number; // [0.01, 0.5], default 0.05 — transition width of the luminance gate
 }
 
 export type LinearMask = LumGate & {
@@ -148,8 +149,8 @@ export class AdjustGLRenderer {
   private kindBuf = new Int32Array(MAX_MASKS);
   private geomABuf = new Float32Array(MAX_MASKS * 4);
   private geomBBuf = new Float32Array(MAX_MASKS * 4);
-  // u_maskGeomC: (lumLow, lumHigh, _, _) — luminance gate for both kinds.
-  // Defaults (0, 1) ⇒ identity ⇒ byte-identical to pre-feature behavior.
+  // u_maskGeomC: (lumLow, lumHigh, lumFeather, _) — luminance gate for all kinds.
+  // Defaults (0, 1, 0.05) ⇒ identity ⇒ byte-identical to pre-feature behavior.
   private geomCBuf = new Float32Array(MAX_MASKS * 4);
   private sliders0Buf = new Float32Array(MAX_MASKS * 4);
   private sliders1Buf = new Float32Array(MAX_MASKS * 4);
@@ -409,6 +410,7 @@ export class AdjustGLRenderer {
       // (lumLow ≤ 0 && lumHigh ≥ 1), so unset gate stays byte-identical.
       this.geomCBuf[i * 4 + 0] = m.lumLow ?? 0;
       this.geomCBuf[i * 4 + 1] = m.lumHigh ?? 1;
+      this.geomCBuf[i * 4 + 2] = m.lumFeather ?? 0.05;
 
       if (m.kind === 'linear') {
         this.kindBuf[i] = 0;
