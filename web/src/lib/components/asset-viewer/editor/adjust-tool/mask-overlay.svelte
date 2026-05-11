@@ -565,7 +565,7 @@
           />
         {:else if mask.kind === 'radial'}
           {@const px = radialPx(mask)}
-          {@const featherEnd = 1 + mask.feather}
+          {@const featherEnd = 1 + mask.feather / 100}
           <ellipse
             cx={px.cx}
             cy={px.cy}
@@ -736,13 +736,10 @@
           </g>
         {:else if mask.kind === 'radial'}
           {@const px = radialPx(mask)}
-          {@const featherEnd = 1 + mask.feather}
+          {@const featherEnd = 1 + mask.feather / 100}
           {@const featherKnobD = px.ry * (1 + mask.feather / 100)}
-          {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
-          {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
           <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
-            <!-- Outer halo (where weight = 0). Only drawn when feather > 0;
-               otherwise it would coincide with the main ellipse. -->
+            <!-- Outer halo (feather zone boundary). Only when feather > 0. -->
             {#if mask.feather > 0.001}
               <ellipse
                 cx={px.cx}
@@ -753,12 +750,11 @@
                 stroke="#7dd3fc"
                 stroke-width="1"
                 stroke-dasharray="3 3"
-                stroke-opacity="0.7"
+                stroke-opacity="0.6"
                 pointer-events="none"
               />
             {/if}
-            <!-- Main / drawn ellipse — the solid inner boundary (everything
-               inside is fully affected). -->
+            <!-- Main ellipse — solid inner boundary. -->
             <ellipse
               cx={px.cx}
               cy={px.cy}
@@ -766,95 +762,53 @@
               ry={px.ry}
               fill="none"
               stroke="#7dd3fc"
-              stroke-width="2"
+              stroke-width="1.5"
               stroke-dasharray="6 4"
               pointer-events="none"
             />
-            <!-- Feather knob: yellow diamond at the top of the outer halo
-               ellipse (or main top when feather = 0). Drag outward to soften,
-               inward to sharpen. -->
+            <!-- Feather knob: small diamond above. Drag up = more feather. -->
             <rect
-              x={px.cx - 6}
-              y={px.cy - featherKnobD - 6}
-              width="12"
-              height="12"
+              x={px.cx - 5}
+              y={px.cy - featherKnobD - 5}
+              width="10"
+              height="10"
               fill="#facc15"
-              stroke="#000"
+              stroke="rgba(0,0,0,0.5)"
               stroke-width="1"
               transform="rotate(45 {px.cx} {px.cy - featherKnobD})"
               style="cursor: grab;"
               onpointerdown={(e) => dragRadialFeather(e, i, mask)}
             />
-            <!-- Mid knob: biases the falloff curve. Only meaningful (and only
-               drawn) when feather > 0. Sits on the y-axis between main top
-               and the feather knob, with a small horizontal offset and
-               connector tick so it reads as belonging to the falloff band. -->
-            {#if mask.feather > 0.001}
-              {@const midParam = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
-              {@const midKnobY = px.cy - px.ry - midParam * (featherKnobD - px.ry)}
-              {@const midKnobX = px.cx + 18}
-              <line
-                x1={px.cx}
-                y1={midKnobY}
-                x2={midKnobX}
-                y2={midKnobY}
-                stroke="#facc15"
-                stroke-width="1.5"
-                pointer-events="none"
-              />
-              <rect
-                x={midKnobX - 5}
-                y={midKnobY - 5}
-                width="10"
-                height="10"
-                fill="#facc15"
-                stroke="#000"
-                stroke-width="1"
-                transform="rotate(45 {midKnobX} {midKnobY})"
-                style="cursor: grab;"
-                onpointerdown={(e) => dragRadialMid(e, i, mask)}
-              />
-            {/if}
-            <!-- Size handle: scales rx and ry uniformly (preserves aspect /
-               keeps a circle a circle). 4:30 position to stay clear of the
-               rx (3 o'clock) and ry (6 o'clock) handles. -->
-            <circle
-              cx={sizeHandleX}
-              cy={sizeHandleY}
-              r="7"
-              fill="#facc15"
-              stroke="#000"
-              stroke-width="1"
-              style="cursor: nwse-resize;"
-              onpointerdown={(e) => dragRadialSize(e, i, mask)}
-            />
+            <!-- Center handle: move. -->
             <circle
               cx={px.cx}
               cy={px.cy}
-              r="9"
+              r="6"
               fill="#0ea5e9"
               stroke="white"
-              stroke-width="2"
+              stroke-width="1.5"
               style="cursor: move;"
               onpointerdown={(e) => dragRadialCenter(e, i, mask)}
             />
+            <!-- Right edge handle: resize rx (E). -->
             <circle
               cx={px.cx + px.rx}
               cy={px.cy}
-              r="7"
+              r="5"
               fill="white"
               stroke="#0ea5e9"
-              stroke-width="2"
+              stroke-width="1.5"
               style="cursor: ew-resize;"
               onpointerdown={(e) => dragRadialRx(e, i, mask)}
             />
+            <!-- Bottom edge handle: resize ry (S). -->
             <circle
               cx={px.cx}
               cy={px.cy + px.ry}
-              r="7"
+              r="5"
               fill="white"
               stroke="#0ea5e9"
-              stroke-width="2"
+              stroke-width="1.5"
               style="cursor: ns-resize;"
               onpointerdown={(e) => dragRadialRy(e, i, mask)}
             />
