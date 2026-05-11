@@ -48,6 +48,8 @@
   interface Props {
     asset: AssetResponseDto;
     onClose: () => void;
+    onNext?: () => void;
+    onPrev?: () => void;
   }
 
   onMount(async () => {
@@ -87,7 +89,20 @@
     }
   }
 
-  let { asset = $bindable(), onClose }: Props = $props();
+  let { asset = $bindable(), onClose, onNext, onPrev }: Props = $props();
+
+  // Navigate to the next/previous photo, saving current edits in the background
+  // so the user doesn't lose work when pressing arrow keys in edit mode.
+  const navigateWithSave = async (direction: 'next' | 'prev') => {
+    if (editManager.hasUnsavedChanges) {
+      await editManager.applyEditsBackground();
+    }
+    if (direction === 'next') {
+      onNext?.();
+    } else {
+      onPrev?.();
+    }
+  };
 
   interface SliderConfig {
     key: keyof AdjustmentValues;
@@ -188,8 +203,10 @@
 
 <svelte:document
   use:shortcuts={[
-    { shortcut: { key: 'Escape' }, onShortcut: onClose },
-    { shortcut: { key: 'Enter' }, onShortcut: applyEdits },
+    { shortcut: { key: 'Escape' }, onShortcut: closeEditor },
+    { shortcut: { key: 'Enter' }, onShortcut: () => editManager.applyEditsBackground() },
+    { shortcut: { key: 'ArrowRight' }, onShortcut: () => navigateWithSave('next') },
+    { shortcut: { key: 'ArrowLeft' }, onShortcut: () => navigateWithSave('prev') },
   ]}
 />
 

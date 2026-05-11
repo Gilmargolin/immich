@@ -157,6 +157,32 @@ export class EditManager {
     }
   }
 
+  // Fire-and-forget save: applies edits without waiting for thumbnail
+  // generation, so the user can navigate immediately. Shows a toast on
+  // success/failure. Safe to call while a full applyEdits() is in flight.
+  async applyEditsBackground(): Promise<void> {
+    if (this.isApplyingEdits || !this.currentAsset) {
+      return;
+    }
+    this.isApplyingEdits = true;
+    const edits = this.tools.flatMap((tool) => tool.manager.edits);
+    const assetId = this.currentAsset.id;
+    const t = await getFormatter();
+    try {
+      await (edits.length === 0
+        ? removeAssetEdits({ id: assetId })
+        : editAsset({ id: assetId, assetEditsCreateDto: { edits } }));
+      eventManager.emit('AssetEditsApplied', assetId);
+      toastManager.primary(t('editor_edits_applied_success'));
+      this.hasAppliedEdits = true;
+    } catch (error) {
+      console.error('Background edit apply failed:', error);
+      toastManager.danger(t('editor_edits_applied_error'));
+    } finally {
+      this.isApplyingEdits = false;
+    }
+  }
+
   async applyEdits(): Promise<boolean> {
     this.isApplyingEdits = true;
 

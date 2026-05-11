@@ -595,7 +595,12 @@
       {#if showDetailPanel}
         <DetailPanel {asset} currentAlbum={album} />
       {:else if assetViewerManager.isShowEditor}
-        <EditorPanel {asset} onClose={closeEditor} />
+        <EditorPanel
+          {asset}
+          onClose={closeEditor}
+          onNext={nextAsset ? () => navigateAsset('next') : undefined}
+          onPrev={previousAsset ? () => navigateAsset('previous') : undefined}
+        />
       {/if}
     </div>
   {/if}

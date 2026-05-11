@@ -198,32 +198,23 @@
     });
   };
 
-  // Schema bound on RadialMask.feather (server: editing.dto.ts).
+  // Schema bound on RadialMask.feather (0–100, stored as percentage of radius).
+  // featherSpan in the math = feather / 100, so feather=100 → soft zone spans
+  // one full radius beyond the ellipse edge.
   const FEATHER_MAX = 100;
-  // Knob travel along the upward y-axis, in units of ry (semi-axis):
-  //   D ∈ [ry, ry · (1 + KNOB_MAX_OFFSET)]
-  const KNOB_MAX_OFFSET = 3;
-  // Logarithmic mapping so the knob stays reachable across the huge
-  // [0, FEATHER_MAX] range:
-  //   D = ry · (1 + ln(1 + feather) / ln(1 + FEATHER_MAX) · KNOB_MAX_OFFSET)
-  //   feather=0   → D = ry        (main top, sharp)
-  //   feather=1   → D ≈ 1.45·ry
-  //   feather=10  → D ≈ 2.56·ry
-  //   feather=100 → D = 4·ry      (knob limit; covers full schema range)
-  // Drag inverse: t = (D/ry - 1) / KNOB_MAX_OFFSET; feather = (1+MAX)^t - 1.
-  // The actual outer-halo ellipse is drawn at the true (1+feather)·r and
-  // can extend far past the knob — that gap intentionally shows how broad
-  // the falloff is.
-  const FEATHER_LOG_BASE = Math.log(1 + FEATHER_MAX);
+  // Linear knob: the diamond sits exactly at the outer soft-zone boundary.
+  //   D = ry · (1 + feather / 100)
+  //   feather=0   → D = ry    (on the ellipse edge, sharp)
+  //   feather=50  → D = 1.5·ry
+  //   feather=100 → D = 2·ry  (outer limit, very soft)
+  // Drag inverse: feather = (D/ry − 1) · 100, clamped to [0, 100].
   const dragRadialFeather = (e: PointerEvent, idx: number, mask: RadialMask) => {
     adjustManager.selectMask(idx);
     const ryPx = Math.max(1, mask.ry * Math.min(svgWidth, svgHeight));
     const cyPx = mask.cy * svgHeight;
     startDrag(e, ({ ny }) => {
-      // Distance ABOVE center along the y-axis (negative drags clamp to 0).
       const distFromCenter = Math.max(0, cyPx - ny * svgHeight);
-      const t = Math.min(1, Math.max(0, distFromCenter / ryPx - 1) / KNOB_MAX_OFFSET);
-      const feather = Math.max(0, Math.min(FEATHER_MAX, Math.exp(t * FEATHER_LOG_BASE) - 1));
+      const feather = Math.max(0, Math.min(FEATHER_MAX, (distFromCenter / ryPx - 1) * 100));
       adjustManager.updateMask(idx, { ...mask, feather });
     });
   };
@@ -241,8 +232,8 @@
     const cyPx = mask.cy * svgHeight;
     // y of main top in SVG coords:
     const mainTopY = cyPx - ryPx;
-    // y of the (log-mapped) feather knob:
-    const featherKnobY = cyPx - ryPx * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET);
+    // y of the feather knob (linear: knob sits at the outer soft-zone boundary):
+    const featherKnobY = cyPx - ryPx * (1 + mask.feather / 100);
     const span = mainTopY - featherKnobY; // > 0 for any feather > 0
     if (span < 1) {
       return; // no visible band — feather is 0; mid has no effect
@@ -500,11 +491,6 @@
 <svelte:window onkeydown={onKeyDown} />
 
 <div class="pointer-events-none absolute inset-0">
-  {#if pendingKind && pendingKind !== 'brush'}
-    <div class="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-black/70 px-3 py-1 text-xs text-white whitespace-nowrap">
-      Click and drag to draw {pendingKind} mask · Esc to cancel
-    </div>
-  {/if}
   <svg
     bind:this={svg}
     class="absolute inset-0 h-full w-full pointer-events-auto"
@@ -542,7 +528,7 @@
               <stop offset="1" stop-color="#ef4444" stop-opacity="0" />
             </linearGradient>
           {:else if mask.kind === 'radial'}
-            {@const featherEnd = 1 + mask.feather}
+            {@const featherEnd = 1 + mask.feather / 100}
             {@const radMid = Math.min(0.95, Math.max(0.05, mask.mid ?? 0.5))}
             {@const innerOffset = 1 / featherEnd}
             {@const midOffset = innerOffset + radMid * (1 - innerOffset)}
@@ -751,7 +737,7 @@
         {:else if mask.kind === 'radial'}
           {@const px = radialPx(mask)}
           {@const featherEnd = 1 + mask.feather}
-          {@const featherKnobD = px.ry * (1 + (Math.log(1 + mask.feather) / FEATHER_LOG_BASE) * KNOB_MAX_OFFSET)}
+          {@const featherKnobD = px.ry * (1 + mask.feather / 100)}
           {@const sizeHandleX = px.cx + px.rx * Math.SQRT1_2}
           {@const sizeHandleY = px.cy + px.ry * Math.SQRT1_2}
           <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
