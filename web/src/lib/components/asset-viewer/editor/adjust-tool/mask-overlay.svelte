@@ -736,79 +736,36 @@
           </g>
         {:else if mask.kind === 'radial'}
           {@const px = radialPx(mask)}
-          {@const featherEnd = 1 + mask.feather / 100}
-          {@const featherKnobD = px.ry * (1 + mask.feather / 100)}
           <g style="transform: rotate({mask.angle}deg); transform-origin: {px.cx}px {px.cy}px;">
-            <!-- Outer halo (feather zone boundary). Only when feather > 0. -->
-            {#if mask.feather > 0.001}
-              <ellipse
-                cx={px.cx}
-                cy={px.cy}
-                rx={px.rx * featherEnd}
-                ry={px.ry * featherEnd}
-                fill="none"
-                stroke="#7dd3fc"
-                stroke-width="1"
-                stroke-dasharray="3 3"
-                stroke-opacity="0.6"
-                pointer-events="none"
-              />
-            {/if}
-            <!-- Main ellipse — solid inner boundary. -->
-            <ellipse
-              cx={px.cx}
-              cy={px.cy}
-              rx={px.rx}
-              ry={px.ry}
-              fill="none"
-              stroke="#7dd3fc"
-              stroke-width="1.5"
-              stroke-dasharray="6 4"
-              pointer-events="none"
-            />
-            <!-- Feather knob: small diamond above. Drag up = more feather. -->
-            <rect
-              x={px.cx - 5}
-              y={px.cy - featherKnobD - 5}
-              width="10"
-              height="10"
-              fill="#facc15"
-              stroke="rgba(0,0,0,0.5)"
-              stroke-width="1"
-              transform="rotate(45 {px.cx} {px.cy - featherKnobD})"
-              style="cursor: grab;"
-              onpointerdown={(e) => dragRadialFeather(e, i, mask)}
-            />
-            <!-- Center handle: move. -->
+            <!-- No ellipse outlines — the red gradient overlay provides visual feedback.
+               Only minimal handles for move/resize. -->
             <circle
               cx={px.cx}
               cy={px.cy}
               r="6"
-              fill="#0ea5e9"
-              stroke="white"
-              stroke-width="1.5"
+              fill="rgba(255,255,255,0.9)"
+              stroke="rgba(0,0,0,0.4)"
+              stroke-width="1"
               style="cursor: move;"
               onpointerdown={(e) => dragRadialCenter(e, i, mask)}
             />
-            <!-- Right edge handle: resize rx (E). -->
             <circle
               cx={px.cx + px.rx}
               cy={px.cy}
-              r="5"
-              fill="white"
-              stroke="#0ea5e9"
-              stroke-width="1.5"
+              r="4"
+              fill="rgba(255,255,255,0.9)"
+              stroke="rgba(0,0,0,0.4)"
+              stroke-width="1"
               style="cursor: ew-resize;"
               onpointerdown={(e) => dragRadialRx(e, i, mask)}
             />
-            <!-- Bottom edge handle: resize ry (S). -->
             <circle
               cx={px.cx}
               cy={px.cy + px.ry}
-              r="5"
-              fill="white"
-              stroke="#0ea5e9"
-              stroke-width="1.5"
+              r="4"
+              fill="rgba(255,255,255,0.9)"
+              stroke="rgba(0,0,0,0.4)"
+              stroke-width="1"
               style="cursor: ns-resize;"
               onpointerdown={(e) => dragRadialRy(e, i, mask)}
             />
@@ -866,23 +823,14 @@
 
     {#if previewRadial}
       {@const pr = previewRadial}
-      <!-- Main ellipse with dashed stroke -->
+      <!-- Soft red fill showing the affected area — no distracting outlines. -->
       <ellipse
         cx={pr.cx} cy={pr.cy} rx={pr.rx} ry={pr.ry}
-        fill="rgba(239,68,68,0.1)"
-        stroke="white" stroke-width="2" stroke-dasharray="6 3"
-        style="filter: drop-shadow(0 0 2px rgba(0,0,0,0.8))"
+        fill="rgba(239,68,68,0.25)"
         pointer-events="none"
       />
-      <!-- Feather halo (default feather ≈ 20 → 1.2× radius) -->
-      <ellipse
-        cx={pr.cx} cy={pr.cy} rx={pr.rx * 1.2} ry={pr.ry * 1.2}
-        fill="none"
-        stroke="rgba(255,255,255,0.4)" stroke-width="1" stroke-dasharray="3 3"
-        pointer-events="none"
-      />
-      <!-- Center dot -->
-      <circle cx={pr.cx} cy={pr.cy} r="4" fill="#3b82f6" stroke="white" stroke-width="1.5" pointer-events="none" />
+      <!-- Small center dot so the user can see the anchor point. -->
+      <circle cx={pr.cx} cy={pr.cy} r="3" fill="rgba(255,255,255,0.8)" stroke="rgba(0,0,0,0.3)" stroke-width="1" pointer-events="none" />
     {/if}
 
     <!-- Draw-mode hint (shown before the user clicks). Brush mode owns its
@@ -903,6 +851,45 @@
       </g>
     {/if}
   </svg>
+
+  <!-- Radial mask toolbar: feather + curve sliders, shown when a radial mask is
+     being edited. Mirrors the brush-overlay toolbar style so the editor reads
+     as a unified tool set. -->
+  {#if editingIndex !== null && masks[editingIndex]?.kind === 'radial'}
+    {@const rm = masks[editingIndex] as RadialMask}
+    <div
+      class="pointer-events-auto absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-black/70 px-3 py-1.5 text-xs text-white"
+      style="font-family: system-ui, sans-serif;"
+    >
+      <div class="flex items-center gap-4">
+        <label class="flex items-center gap-2">
+          Feather
+          <input
+            type="range" min="0" max="100" step="1"
+            value={rm.feather}
+            oninput={(e) => {
+              if (editingIndex === null) return;
+              adjustManager.updateMask(editingIndex, { ...rm, feather: Number((e.currentTarget as HTMLInputElement).value) });
+            }}
+            class="w-28"
+          />
+          <span class="tabular-nums w-7 text-right">{Math.round(rm.feather)}%</span>
+        </label>
+        <label class="flex items-center gap-2">
+          Dropoff
+          <input
+            type="range" min="0.05" max="0.95" step="0.01"
+            value={rm.mid ?? 0.5}
+            oninput={(e) => {
+              if (editingIndex === null) return;
+              adjustManager.updateMask(editingIndex, { ...rm, mid: Number((e.currentTarget as HTMLInputElement).value) });
+            }}
+            class="w-24"
+          />
+        </label>
+      </div>
+    </div>
+  {/if}
 
   <!-- Brush mask overlays. Three states:
      1. pendingMaskKind === 'brush' (no committed brush mask yet) → show an
