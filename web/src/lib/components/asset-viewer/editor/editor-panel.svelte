@@ -132,6 +132,13 @@
 
   let isRotated = $derived(transformManager.normalizedRotation % 180 !== 0);
 
+  // Lens-correction caption derivations: kept in the script section because
+  // Svelte 5 only allows {@const} as the immediate child of a control-flow
+  // block (e.g. {#if}), not at the top of an unwrapped template region.
+  let lensProfile = $derived(lensCorrectionManager.profile);
+  let lensCaption = $derived(lensProfile.displayName ?? lensProfile.lensModel ?? null);
+  let focalText = $derived(lensProfile.focalLength ? ` · ${Math.round(lensProfile.focalLength)}mm` : '');
+
   interface AspectRatioOption {
     label: string;
     value: string;
@@ -554,10 +561,9 @@
 
     <!-- Lens Correction (sub-section). Sits inside the Adjust block but
          operates on geometry rather than tone — auto-detected per asset from
-         EXIF, with manual strength + keystone sliders. -->
-    {@const lensProfile = lensCorrectionManager.profile}
-    {@const lensCaption = lensProfile.displayName ?? lensProfile.lensModel ?? null}
-    {@const focalText = lensProfile.focalLength ? ` · ${Math.round(lensProfile.focalLength)}mm` : ''}
+         EXIF, with manual strength + keystone sliders. Derived state for
+         lensProfile/lensCaption/focalText is defined in the script section
+         because {@const} can't live directly under a template-level region. -->
     <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-3 flex items-center justify-between">
       <span class="flex items-center gap-1">
         <Icon icon={mdiCamera} size="14" />
