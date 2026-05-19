@@ -1068,12 +1068,26 @@ export type AdjustParameters = {
     /** White point adjustment (-1 to 1, 0 = no change) */
     whitePoint: number;
 };
+export type LensCorrectionParameters = {
+    /** Strength multiplier on the auto-resolved radial coefficients (0 = bypass, 1 = full correction). */
+    distortionStrength: number;
+    /** Radial distortion coefficient k1 (r² term). 0 disables this term. */
+    k1: number;
+    /** Radial distortion coefficient k2 (r⁴ term). 0 disables this term. */
+    k2: number;
+    /** Radial distortion coefficient k3 (r⁶ term). 0 disables this term. */
+    k3: number;
+    /** Horizontal keystone (-1..1). */
+    keystoneH: number;
+    /** Vertical keystone (-1..1). */
+    keystoneV: number;
+};
 export type AssetEditActionItemResponseDto = {
     /** Type of edit action to perform */
     action: AssetEditAction;
     id: string;
-    /** List of edit actions to apply (crop, rotate, mirror, or adjust) */
-    parameters: CropParameters | RotateParameters | MirrorParameters | AdjustParameters;
+    /** List of edit actions to apply (crop, rotate, mirror, adjust, or lens correction) */
+    parameters: CropParameters | RotateParameters | MirrorParameters | AdjustParameters | LensCorrectionParameters;
 };
 export type AssetEditsResponseDto = {
     /** Asset ID these edits belong to */
@@ -1084,12 +1098,23 @@ export type AssetEditsResponseDto = {
 export type AssetEditActionItemDto = {
     /** Type of edit action to perform */
     action: AssetEditAction;
-    /** List of edit actions to apply (crop, rotate, mirror, or adjust) */
-    parameters: CropParameters | RotateParameters | MirrorParameters | AdjustParameters;
+    /** List of edit actions to apply (crop, rotate, mirror, adjust, or lens correction) */
+    parameters: CropParameters | RotateParameters | MirrorParameters | AdjustParameters | LensCorrectionParameters;
 };
 export type AssetEditsCreateDto = {
     /** List of edit actions to apply (crop, rotate, or mirror) */
     edits: AssetEditActionItemDto[];
+};
+export type AssetLensProfileResponseDto = {
+    cameraMake?: string | null;
+    cameraModel?: string | null;
+    lensModel?: string | null;
+    focalLength?: number | null;
+    displayName?: string | null;
+    hasProfile: boolean;
+    k1: number;
+    k2: number;
+    k3: number;
 };
 export type IdentifyResultDto = {
     commonName?: string | null;
@@ -4308,6 +4333,19 @@ export function editAsset({ id, assetEditsCreateDto }: {
     })));
 }
 /**
+ * Get the resolved lens-correction profile for an asset
+ */
+export function getAssetLensProfile({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetLensProfileResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/lens-profile`, {
+        ...opts
+    }));
+}
+/**
  * Identify subject in asset
  */
 export function identifyAssetSubject({ id }: {
@@ -7238,7 +7276,8 @@ export enum AssetEditAction {
     Crop = "crop",
     Rotate = "rotate",
     Mirror = "mirror",
-    Adjust = "adjust"
+    Adjust = "adjust",
+    LensCorrection = "lensCorrection"
 }
 export enum MirrorAxis {
     Horizontal = "horizontal",

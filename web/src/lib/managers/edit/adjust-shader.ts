@@ -48,10 +48,22 @@ out vec4 outColor;
 
 uniform sampler2D u_image;
 uniform vec2 u_imageSize;
+// Source-image dimensions (in pixels) BEFORE the crop is applied. Used for
+// lens-correction normalization (r=1 at the full sensor's image corner),
+// which must operate on the un-cropped sensor frame to match the server.
+// u_imageSize, by contrast, carries the cropped dimensions for mask math.
+uniform vec2 u_sourceSize;
 // Crop rect as (u0, v0, u1, v1) in texture-UV space [0,1]. When the user has
 // a pending crop, this restricts sampling to that subregion so the canvas
 // shows the post-crop view (matches what crop mode renders).
 uniform vec4 u_cropRect;
+
+// Lens correction. u_lensK = (k1, k2, k3) for r' = r·(1 + s·(k1·r² + k2·r⁴ + k3·r⁶)).
+// u_lensStrength = s in [0, 1]. u_lensKeystone = (keystoneH, keystoneV) in [-1, 1].
+// Identity defaults: u_lensStrength = 0, u_lensKeystone = (0, 0).
+uniform vec3 u_lensK;
+uniform float u_lensStrength;
+uniform vec2 u_lensKeystone;
 
 // Global sliders (same nine fields as AdjustmentSliders)
 uniform float u_brightness;
@@ -233,10 +245,46 @@ float maskWeight(int idx, vec2 px) {
   return invert ? 1.0 - w : w;
 }
 
+// Lens correction output->source remap. Given a UV position in the corrected
+// (un-cropped) image, returns the source UV to sample from. Identity when
+// strength=0 and keystone=(0,0) -- pre-existing render path is byte-stable.
+// Mirrors applyLensCorrection in server/src/repositories/media.repository.ts.
+vec2 applyLensCorrectionInverse(vec2 uv) {
+  if (u_lensStrength <= 0.0 && u_lensKeystone.x == 0.0 && u_lensKeystone.y == 0.0) {
+    return uv;
+  }
+  // Convert UV → centered normalized coords where r=1 at the source's
+  // image-corner (so the polynomial is unit-scaled regardless of aspect).
+  vec2 px = uv * u_sourceSize;
+  vec2 ctr = u_sourceSize * 0.5;
+  float halfDiag = length(u_sourceSize) * 0.5;
+  vec2 n = (px - ctr) / halfDiag;
+
+  // Keystone (linear shears in normalized coords). keystone.x = horizontal,
+  // .y = vertical. Order matches the server (independent shears, both small).
+  vec2 nk;
+  nk.x = n.x * (1.0 + u_lensKeystone.y * n.y);
+  nk.y = n.y * (1.0 + u_lensKeystone.x * n.x);
+
+  // Radial: forward-evaluate the polynomial (output→source map).
+  float r2 = dot(nk, nk);
+  float r4 = r2 * r2;
+  float r6 = r4 * r2;
+  float factor = 1.0 + u_lensStrength * (u_lensK.x * r2 + u_lensK.y * r4 + u_lensK.z * r6);
+  vec2 ns = nk * factor;
+
+  // Denormalize back to UV.
+  vec2 srcPx = ns * halfDiag + ctr;
+  return srcPx / u_sourceSize;
+}
+
 void main() {
   // Sample within the crop rect — v_texCoord is the canvas's [0,1] but the
-  // texture coords go through the crop region.
-  vec2 uv = mix(u_cropRect.xy, u_cropRect.zw, v_texCoord);
+  // texture coords go through the crop region. Lens correction is applied
+  // BEFORE crop server-side, so here we run the inverse remap on the
+  // un-cropped UV to find the source pixel.
+  vec2 uvUncropped = mix(u_cropRect.xy, u_cropRect.zw, v_texCoord);
+  vec2 uv = applyLensCorrectionInverse(uvUncropped);
   vec4 srcRgba = texture(u_image, uv);
   vec3 lin = srgbToLinear(srcRgba.rgb);
 

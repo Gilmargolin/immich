@@ -2,6 +2,7 @@
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { AdjustGLRenderer, FULL_CROP, type CropRect } from '$lib/managers/edit/adjust-webgl';
+  import { lensCorrectionManager } from '$lib/managers/edit/lens-correction-manager.svelte';
   import { onDestroy, onMount, type Snippet } from 'svelte';
 
   interface Props {
@@ -125,7 +126,7 @@
     pendingRaf = requestAnimationFrame(() => {
       pendingRaf = null;
       if (renderer && imageLoaded) {
-        renderer.render(adjustManager.values, adjustManager.masks, cropRect);
+        renderer.render(adjustManager.values, adjustManager.masks, cropRect, lensCorrectionManager.shaderUniforms);
       }
     });
   };
@@ -141,6 +142,12 @@
     void adjustManager.values.whitePoint;
     void adjustManager.values.blackPoint;
     void adjustManager.masks;
+    void lensCorrectionManager.state.distortionStrength;
+    void lensCorrectionManager.state.keystoneH;
+    void lensCorrectionManager.state.keystoneV;
+    void lensCorrectionManager.profile.k1;
+    void lensCorrectionManager.profile.k2;
+    void lensCorrectionManager.profile.k3;
     scheduleRender();
   });
 

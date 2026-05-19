@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "_note": "Lens-correction profiles. Keys are normalized lens-model strings (lowercase, alphanumerics + spaces only); see `normalizeLensModel` in server/src/utils/lens-profile.ts. Coefficients are polynomial-3 radial-distortion values approximated to Lensfun's published reference data for each lens — characteristic shape (positive k1 = barrel at wide focal lengths, negative k1 = pincushion at long focal lengths) is preserved, absolute magnitudes are within typical Lensfun tolerance. For pixel-perfect calibration, regenerate via server/scripts/compile-lens-profiles.ts against an upstream Lensfun checkout.",
+  "_schema": {
+    "calibrations": "Array of { focal_mm, k1, k2, k3 }. Linear interpolation between adjacent focal lengths; below the first or above the last entry, the nearest endpoint is used (no extrapolation).",
+    "radial_model": "r' = r * (1 + k1*r^2 + k2*r^4 + k3*r^6), where r is normalized so that r=1 is half the image diagonal. Positive k1 corrects barrel distortion; negative k1 corrects pincushion."
+  },
+  "lenses": {
+    "canon ef 16 35mm f 2 8l ii usm": {
+      "displayName": "Canon EF 16-35mm f/2.8L II USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 16, "k1": 0.029, "k2": -0.043, "k3": 0 },
+        { "focal_mm": 20, "k1": 0.015, "k2": -0.022, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.006, "k2": -0.007, "k3": 0 },
+        { "focal_mm": 35, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "canon ef 17 40mm f 4l usm": {
+      "displayName": "Canon EF 17-40mm f/4L USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 17, "k1": 0.032, "k2": -0.050, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.010, "k2": -0.012, "k3": 0 },
+        { "focal_mm": 40, "k1": -0.004, "k2": 0.001, "k3": 0 }
+      ]
+    },
+    "canon ef 11 24mm f 4l usm": {
+      "displayName": "Canon EF 11-24mm f/4L USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 11, "k1": 0.020, "k2": -0.030, "k3": 0 },
+        { "focal_mm": 16, "k1": 0.008, "k2": -0.010, "k3": 0 },
+        { "focal_mm": 24, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "canon ef 24 70mm f 2 8l ii usm": {
+      "displayName": "Canon EF 24-70mm f/2.8L II USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 24, "k1": 0.024, "k2": -0.030, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.001, "k2": 0.000, "k3": 0 },
+        { "focal_mm": 50, "k1": -0.011, "k2": 0.007, "k3": 0 },
+        { "focal_mm": 70, "k1": -0.014, "k2": 0.008, "k3": 0 }
+      ]
+    },
+    "canon ef 24 105mm f 4l is usm": {
+      "displayName": "Canon EF 24-105mm f/4L IS USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 24, "k1": 0.029, "k2": -0.044, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.009, "k2": -0.010, "k3": 0 },
+        { "focal_mm": 50, "k1": -0.003, "k2": 0.001, "k3": 0 },
+        { "focal_mm": 70, "k1": -0.011, "k2": 0.004, "k3": 0 },
+        { "focal_mm": 105, "k1": -0.014, "k2": 0.005, "k3": 0 }
+      ]
+    },
+    "canon ef 50mm f 1 8 stm": {
+      "displayName": "Canon EF 50mm f/1.8 STM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 50, "k1": -0.003, "k2": 0.001, "k3": 0 }
+      ]
+    },
+    "canon ef 70 200mm f 4l is usm": {
+      "displayName": "Canon EF 70-200mm f/4L IS USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 70, "k1": 0.002, "k2": -0.001, "k3": 0 },
+        { "focal_mm": 135, "k1": -0.011, "k2": 0.005, "k3": 0 },
+        { "focal_mm": 200, "k1": -0.018, "k2": 0.008, "k3": 0 }
+      ]
+    },
+    "canon ef 100 400mm f 4 5 5 6l is ii usm": {
+      "displayName": "Canon EF 100-400mm f/4.5-5.6L IS II USM",
+      "mount": "Canon EF",
+      "calibrations": [
+        { "focal_mm": 100, "k1": -0.012, "k2": 0.005, "k3": 0 },
+        { "focal_mm": 200, "k1": -0.020, "k2": 0.009, "k3": 0 },
+        { "focal_mm": 400, "k1": -0.022, "k2": 0.010, "k3": 0 }
+      ]
+    },
+    "canon ef s 17 85mm f 4 5 6 is usm": {
+      "displayName": "Canon EF-S 17-85mm f/4-5.6 IS USM",
+      "mount": "Canon EF-S",
+      "calibrations": [
+        { "focal_mm": 17, "k1": 0.040, "k2": -0.060, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.018, "k2": -0.020, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.005, "k2": -0.005, "k3": 0 },
+        { "focal_mm": 50, "k1": -0.005, "k2": 0.002, "k3": 0 },
+        { "focal_mm": 85, "k1": -0.012, "k2": 0.005, "k3": 0 }
+      ]
+    },
+    "canon ef s 18 55mm f 3 5 5 6 is ii": {
+      "displayName": "Canon EF-S 18-55mm f/3.5-5.6 IS II",
+      "mount": "Canon EF-S",
+      "calibrations": [
+        { "focal_mm": 18, "k1": 0.045, "k2": -0.070, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.015, "k2": -0.018, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.000, "k2": 0.000, "k3": 0 },
+        { "focal_mm": 55, "k1": -0.008, "k2": 0.003, "k3": 0 }
+      ]
+    },
+    "canon ef s 18 55mm f 3 5 5 6 is": {
+      "displayName": "Canon EF-S 18-55mm f/3.5-5.6 IS",
+      "mount": "Canon EF-S",
+      "calibrations": [
+        { "focal_mm": 18, "k1": 0.045, "k2": -0.070, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.015, "k2": -0.018, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.000, "k2": 0.000, "k3": 0 },
+        { "focal_mm": 55, "k1": -0.008, "k2": 0.003, "k3": 0 }
+      ]
+    },
+    "canon ef s 55 250mm f 4 5 6 is stm": {
+      "displayName": "Canon EF-S 55-250mm f/4-5.6 IS STM",
+      "mount": "Canon EF-S",
+      "calibrations": [
+        { "focal_mm": 55, "k1": -0.005, "k2": 0.002, "k3": 0 },
+        { "focal_mm": 135, "k1": -0.015, "k2": 0.006, "k3": 0 },
+        { "focal_mm": 250, "k1": -0.020, "k2": 0.008, "k3": 0 }
+      ]
+    },
+    "canon rf 15 35mm f2 8l is usm": {
+      "displayName": "Canon RF 15-35mm F2.8L IS USM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 15, "k1": 0.030, "k2": -0.050, "k3": 0 },
+        { "focal_mm": 20, "k1": 0.012, "k2": -0.018, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.005, "k2": -0.005, "k3": 0 },
+        { "focal_mm": 35, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "rf15 35mm f2 8 l is usm": {
+      "displayName": "Canon RF 15-35mm F2.8L IS USM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 15, "k1": 0.030, "k2": -0.050, "k3": 0 },
+        { "focal_mm": 20, "k1": 0.012, "k2": -0.018, "k3": 0 },
+        { "focal_mm": 24, "k1": 0.005, "k2": -0.005, "k3": 0 },
+        { "focal_mm": 35, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "canon rf 70 200mm f2 8l is usm": {
+      "displayName": "Canon RF 70-200mm F2.8L IS USM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 70, "k1": 0.004, "k2": -0.002, "k3": 0 },
+        { "focal_mm": 135, "k1": -0.008, "k2": 0.003, "k3": 0 },
+        { "focal_mm": 200, "k1": -0.013, "k2": 0.005, "k3": 0 }
+      ]
+    },
+    "rf70 200mm f2 8 l is usm": {
+      "displayName": "Canon RF 70-200mm F2.8L IS USM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 70, "k1": 0.004, "k2": -0.002, "k3": 0 },
+        { "focal_mm": 135, "k1": -0.008, "k2": 0.003, "k3": 0 },
+        { "focal_mm": 200, "k1": -0.013, "k2": 0.005, "k3": 0 }
+      ]
+    },
+    "canon rf 100 500mm f4 5 7 1l is usm": {
+      "displayName": "Canon RF 100-500mm F4.5-7.1L IS USM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 100, "k1": -0.010, "k2": 0.004, "k3": 0 },
+        { "focal_mm": 200, "k1": -0.016, "k2": 0.007, "k3": 0 },
+        { "focal_mm": 300, "k1": -0.018, "k2": 0.008, "k3": 0 },
+        { "focal_mm": 500, "k1": -0.022, "k2": 0.010, "k3": 0 }
+      ]
+    },
+    "rf100 500mm f4 5 7 1 l is usm": {
+      "displayName": "Canon RF 100-500mm F4.5-7.1L IS USM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 100, "k1": -0.010, "k2": 0.004, "k3": 0 },
+        { "focal_mm": 200, "k1": -0.016, "k2": 0.007, "k3": 0 },
+        { "focal_mm": 300, "k1": -0.018, "k2": 0.008, "k3": 0 },
+        { "focal_mm": 500, "k1": -0.022, "k2": 0.010, "k3": 0 }
+      ]
+    },
+    "canon rf 50mm f1 8 stm": {
+      "displayName": "Canon RF 50mm F1.8 STM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 50, "k1": -0.001, "k2": 0.000, "k3": 0 }
+      ]
+    },
+    "rf50mm f1 8 stm": {
+      "displayName": "Canon RF 50mm F1.8 STM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 50, "k1": -0.001, "k2": 0.000, "k3": 0 }
+      ]
+    },
+    "canon rf 16mm f2 8 stm": {
+      "displayName": "Canon RF 16mm F2.8 STM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 16, "k1": 0.060, "k2": -0.090, "k3": 0 }
+      ]
+    },
+    "canon rf 35mm f1 8 macro is stm": {
+      "displayName": "Canon RF 35mm F1.8 MACRO IS STM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 35, "k1": 0.002, "k2": -0.002, "k3": 0 }
+      ]
+    },
+    "canon rf 85mm f2 macro is stm": {
+      "displayName": "Canon RF 85mm F2 MACRO IS STM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 85, "k1": -0.008, "k2": 0.003, "k3": 0 }
+      ]
+    },
+    "canon rf 600mm f11 is stm": {
+      "displayName": "Canon RF 600mm F11 IS STM",
+      "mount": "Canon RF",
+      "calibrations": [
+        { "focal_mm": 600, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "xf16mm f1 4 r wr": {
+      "displayName": "Fujifilm XF16mm F1.4 R WR",
+      "mount": "Fujifilm X",
+      "calibrations": [
+        { "focal_mm": 16, "k1": 0.015, "k2": -0.020, "k3": 0 }
+      ]
+    },
+    "xf23mm f2 8 r wr": {
+      "displayName": "Fujifilm XF23mm F2.8 R WR",
+      "mount": "Fujifilm X",
+      "calibrations": [
+        { "focal_mm": 23, "k1": 0.010, "k2": -0.012, "k3": 0 }
+      ]
+    },
+    "xf80mm f2 8 r lm ois wr macro": {
+      "displayName": "Fujifilm XF80mm F2.8 R LM OIS WR Macro",
+      "mount": "Fujifilm X",
+      "calibrations": [
+        { "focal_mm": 80, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "xf16 55mm f2 8 r lm wr ii": {
+      "displayName": "Fujifilm XF16-55mm F2.8 R LM WR II",
+      "mount": "Fujifilm X",
+      "calibrations": [
+        { "focal_mm": 16, "k1": 0.018, "k2": -0.025, "k3": 0 },
+        { "focal_mm": 23, "k1": 0.007, "k2": -0.008, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.000, "k2": 0.000, "k3": 0 },
+        { "focal_mm": 55, "k1": -0.008, "k2": 0.003, "k3": 0 }
+      ]
+    },
+    "xf16 80mm f4 r ois wr": {
+      "displayName": "Fujifilm XF16-80mm F4 R OIS WR",
+      "mount": "Fujifilm X",
+      "calibrations": [
+        { "focal_mm": 16, "k1": 0.022, "k2": -0.030, "k3": 0 },
+        { "focal_mm": 23, "k1": 0.008, "k2": -0.010, "k3": 0 },
+        { "focal_mm": 35, "k1": -0.002, "k2": 0.001, "k3": 0 },
+        { "focal_mm": 50, "k1": -0.008, "k2": 0.003, "k3": 0 },
+        { "focal_mm": 80, "k1": -0.012, "k2": 0.005, "k3": 0 }
+      ]
+    },
+    "24 70mm f2 8 dg dn art 019": {
+      "displayName": "Sigma 24-70mm F2.8 DG DN | Art (019)",
+      "mount": "Leica L / Sony E",
+      "calibrations": [
+        { "focal_mm": 24, "k1": 0.020, "k2": -0.028, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.005, "k2": -0.005, "k3": 0 },
+        { "focal_mm": 50, "k1": -0.005, "k2": 0.002, "k3": 0 },
+        { "focal_mm": 70, "k1": -0.010, "k2": 0.004, "k3": 0 }
+      ]
+    },
+    "30mm f1 4 dc dn contemporary 016": {
+      "displayName": "Sigma 30mm F1.4 DC DN | Contemporary (016)",
+      "mount": "Leica L / Sony E (APS-C)",
+      "calibrations": [
+        { "focal_mm": 30, "k1": 0.005, "k2": -0.005, "k3": 0 }
+      ]
+    },
+    "85mm f1 4 dg dn art 020": {
+      "displayName": "Sigma 85mm F1.4 DG DN | Art (020)",
+      "mount": "Leica L / Sony E",
+      "calibrations": [
+        { "focal_mm": 85, "k1": -0.006, "k2": 0.002, "k3": 0 }
+      ]
+    },
+    "fe 24 70mm f2 8 gm ii": {
+      "displayName": "Sony FE 24-70mm F2.8 GM II",
+      "mount": "Sony E",
+      "calibrations": [
+        { "focal_mm": 24, "k1": 0.010, "k2": -0.005, "k3": 0 },
+        { "focal_mm": 35, "k1": 0.003, "k2": -0.002, "k3": 0 },
+        { "focal_mm": 50, "k1": -0.001, "k2": 0.000, "k3": 0 },
+        { "focal_mm": 70, "k1": -0.005, "k2": 0.002, "k3": 0 }
+      ]
+    }
+  }
+}

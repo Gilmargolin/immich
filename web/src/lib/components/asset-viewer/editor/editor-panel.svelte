@@ -3,6 +3,7 @@
   import { editManager, EditToolType } from '$lib/managers/edit/edit-manager.svelte';
   import { adjustManager, type AdjustmentValues } from '$lib/managers/edit/adjust-manager.svelte';
   import { editsClipboard } from '$lib/managers/edit/edits-clipboard.svelte';
+  import { lensCorrectionManager } from '$lib/managers/edit/lens-correction-manager.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { websocketEvents } from '$lib/stores/websocket';
   import { getAssetEdits, type AssetResponseDto } from '@immich/sdk';
@@ -23,11 +24,15 @@
     mdiRotateRight,
   } from '@mdi/js';
   import {
+    mdiArrowExpandHorizontal,
+    mdiArrowExpandVertical,
     mdiBrightness6,
+    mdiCamera,
     mdiContrastCircle,
     mdiWaterOutline,
     mdiThermometer,
     mdiPalette,
+    mdiTune,
     mdiWhiteBalanceSunny,
     mdiWeatherNight,
     mdiCircleOutline,
@@ -547,8 +552,60 @@
       </div>
     {/if}
 
+    <!-- Lens Correction (sub-section). Sits inside the Adjust block but
+         operates on geometry rather than tone — auto-detected per asset from
+         EXIF, with manual strength + keystone sliders. -->
+    {@const lensProfile = lensCorrectionManager.profile}
+    {@const lensCaption = lensProfile.displayName ?? lensProfile.lensModel ?? null}
+    {@const focalText = lensProfile.focalLength ? ` · ${Math.round(lensProfile.focalLength)}mm` : ''}
+    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-3 flex items-center justify-between">
+      <span class="flex items-center gap-1">
+        <Icon icon={mdiCamera} size="14" />
+        <span>Lens Correction</span>
+      </span>
+      {#if lensProfile.hasProfile}
+        <span
+          class="rounded bg-immich-primary/20 px-1.5 py-0.5 text-[10px] text-immich-primary normal-case tracking-normal"
+        >
+          auto
+        </span>
+      {/if}
+    </h2>
+    {#if lensCaption}
+      <div class="px-1 pb-1 text-[11px] text-gray-400 truncate" title={`${lensCaption}${focalText}`}>
+        {lensCaption}{focalText}
+      </div>
+    {:else}
+      <div class="px-1 pb-1 text-[11px] text-gray-500 italic">No lens EXIF — keystone still works.</div>
+    {/if}
+    {#if lensCaption && !lensProfile.hasProfile}
+      <div class="px-1 pb-1 text-[11px] text-gray-500 italic">No profile for this lens — keystone still works.</div>
+    {/if}
+    <div class:opacity-50={!lensProfile.hasProfile}>
+      <AdjustSlider
+        icon={mdiTune}
+        label="Distortion"
+        value={lensCorrectionManager.state.distortionStrength}
+        min={0}
+        max={1}
+        onchange={(v) => lensCorrectionManager.setDistortionStrength(v)}
+      />
+    </div>
+    <AdjustSlider
+      icon={mdiArrowExpandHorizontal}
+      label="Keystone H"
+      value={lensCorrectionManager.state.keystoneH}
+      onchange={(v) => lensCorrectionManager.setKeystoneH(v)}
+    />
+    <AdjustSlider
+      icon={mdiArrowExpandVertical}
+      label="Keystone V"
+      value={lensCorrectionManager.state.keystoneV}
+      onchange={(v) => lensCorrectionManager.setKeystoneV(v)}
+    />
+
     <!-- Light adjustments -->
-    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-2">
+    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-3">
       {$t('adjust_light')}{adjustManager.selectedMaskIndex !== null
         ? ` — ${maskLabel(adjustManager.masks[adjustManager.selectedMaskIndex], adjustManager.selectedMaskIndex)}`
         : ''}

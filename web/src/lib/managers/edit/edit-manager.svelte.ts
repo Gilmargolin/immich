@@ -1,6 +1,7 @@
 import AdjustTool from '$lib/components/asset-viewer/editor/adjust-tool/adjust-tool.svelte';
 import TransformTool from '$lib/components/asset-viewer/editor/transform-tool/transform-tool.svelte';
 import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
+import { lensCorrectionManager } from '$lib/managers/edit/lens-correction-manager.svelte';
 import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { waitForWebsocketEvent } from '$lib/stores/websocket';
@@ -50,6 +51,12 @@ export class EditManager {
     },
   ];
 
+  // Sub-managers that aren't standalone tools but participate in the same
+  // activate / save / reset lifecycle. Lens correction lives inside the
+  // Adjust panel visually but maintains its own state (EXIF-driven profile,
+  // separate AssetEditAction) so it doesn't piggyback on AdjustManager.
+  subManagers: EditToolManager[] = [lensCorrectionManager];
+
   currentAsset = $state<AssetResponseDto | null>(null);
   selectedTool = $state<EditTool | null>(null);
   private activatedTools = new Set<EditToolType>();
@@ -67,8 +74,11 @@ export class EditManager {
    * edits. Wired to a press-and-hold button in the editor toolbar. */
   showOriginal = $state(false);
 
-  hasUnsavedChanges = $derived(this.tools.some((t) => t.manager.hasChanges) && !this.hasAppliedEdits);
-  canReset = $derived(this.tools.some((t) => t.manager.canReset));
+  hasUnsavedChanges = $derived(
+    (this.tools.some((t) => t.manager.hasChanges) || this.subManagers.some((m) => m.hasChanges)) &&
+      !this.hasAppliedEdits,
+  );
+  canReset = $derived(this.tools.some((t) => t.manager.canReset) || this.subManagers.some((m) => m.canReset));
 
   async closeConfirm(): Promise<boolean> {
     // Prevent multiple dialogs (usually happens with rapid escape key presses)
@@ -98,6 +108,9 @@ export class EditManager {
   reset() {
     for (const tool of this.tools) {
       tool.manager.onDeactivate?.();
+    }
+    for (const m of this.subManagers) {
+      m.onDeactivate?.();
     }
     this.activatedTools.clear();
     this.selectedTool = this.tools[0];
@@ -137,12 +150,19 @@ export class EditManager {
       }
     }
 
+    for (const m of this.subManagers) {
+      await m.onActivate?.(asset, edits.edits);
+    }
+
     this.selectedTool = this.tools[0];
   }
 
   cleanup() {
     for (const tool of this.tools) {
       tool.manager.onDeactivate?.();
+    }
+    for (const m of this.subManagers) {
+      m.onDeactivate?.();
     }
     this.activatedTools.clear();
     this.currentAsset = null;
@@ -155,6 +175,9 @@ export class EditManager {
     for (const tool of this.tools) {
       await tool.manager.resetAllChanges();
     }
+    for (const m of this.subManagers) {
+      await m.resetAllChanges();
+    }
   }
 
   // Fire-and-forget save: applies edits without waiting for thumbnail
@@ -165,7 +188,10 @@ export class EditManager {
       return;
     }
     this.isApplyingEdits = true;
-    const edits = this.tools.flatMap((tool) => tool.manager.edits);
+    const edits = [
+      ...this.tools.flatMap((tool) => tool.manager.edits),
+      ...this.subManagers.flatMap((m) => m.edits),
+    ];
     const assetId = this.currentAsset.id;
     const t = await getFormatter();
     try {
@@ -186,7 +212,10 @@ export class EditManager {
   async applyEdits(): Promise<boolean> {
     this.isApplyingEdits = true;
 
-    const edits = this.tools.flatMap((tool) => tool.manager.edits);
+    const edits = [
+      ...this.tools.flatMap((tool) => tool.manager.edits),
+      ...this.subManagers.flatMap((m) => m.edits),
+    ];
     if (!this.currentAsset) {
       return false;
     }

@@ -104,7 +104,11 @@ const linkProgram = (gl: WebGL2RenderingContext, vs: WebGLShader, fs: WebGLShade
 type Uniforms = {
   u_image: WebGLUniformLocation;
   u_imageSize: WebGLUniformLocation;
+  u_sourceSize: WebGLUniformLocation;
   u_cropRect: WebGLUniformLocation;
+  u_lensK: WebGLUniformLocation;
+  u_lensStrength: WebGLUniformLocation;
+  u_lensKeystone: WebGLUniformLocation;
   globals: Record<keyof AdjustmentSliders, WebGLUniformLocation>;
   u_maskCount: WebGLUniformLocation;
   u_maskKind: WebGLUniformLocation;
@@ -115,6 +119,25 @@ type Uniforms = {
   u_maskSliders1: WebGLUniformLocation;
   u_maskBlackPoint: WebGLUniformLocation;
   brushSamplers: WebGLUniformLocation[];
+};
+
+// Renderer-facing view of LensCorrectionManager state. Identity defaults are
+// safe and zero-cost in the shader.
+export type LensCorrectionUniforms = {
+  k1: number;
+  k2: number;
+  k3: number;
+  distortionStrength: number;
+  keystoneH: number;
+  keystoneV: number;
+};
+export const LENS_CORRECTION_IDENTITY: LensCorrectionUniforms = {
+  k1: 0,
+  k2: 0,
+  k3: 0,
+  distortionStrength: 0,
+  keystoneH: 0,
+  keystoneV: 0,
 };
 
 // Texture unit 0 is the source image; brush masks live at units [1, MAX_MASKS+1).
@@ -249,7 +272,11 @@ export class AdjustGLRenderer {
     this.uniforms = {
       u_image: requireLocation(gl, this.program, 'u_image'),
       u_imageSize: requireLocation(gl, this.program, 'u_imageSize'),
+      u_sourceSize: requireLocation(gl, this.program, 'u_sourceSize'),
       u_cropRect: requireLocation(gl, this.program, 'u_cropRect'),
+      u_lensK: requireLocation(gl, this.program, 'u_lensK'),
+      u_lensStrength: requireLocation(gl, this.program, 'u_lensStrength'),
+      u_lensKeystone: requireLocation(gl, this.program, 'u_lensKeystone'),
       globals: {
         brightness: requireLocation(gl, this.program, 'u_brightness'),
         contrast: requireLocation(gl, this.program, 'u_contrast'),
@@ -348,7 +375,12 @@ export class AdjustGLRenderer {
     }
   }
 
-  render(globals: AdjustmentSliders, masks: LocalMask[], crop: CropRect = FULL_CROP): void {
+  render(
+    globals: AdjustmentSliders,
+    masks: LocalMask[],
+    crop: CropRect = FULL_CROP,
+    lens: LensCorrectionUniforms = LENS_CORRECTION_IDENTITY,
+  ): void {
     const gl = this.gl;
     const u = this.uniforms;
     const canvas = gl.canvas as HTMLCanvasElement;
@@ -373,6 +405,13 @@ export class AdjustGLRenderer {
     const cropPixelW = Math.max(1, (crop.u1 - crop.u0) * this.imageWidth);
     const cropPixelH = Math.max(1, (crop.v1 - crop.v0) * this.imageHeight);
     gl.uniform2f(u.u_imageSize, cropPixelW, cropPixelH);
+    // Lens correction normalizes against the FULL source dimensions (the
+    // sensor frame), not the crop — its coefficients are calibrated against
+    // the original image diagonal.
+    gl.uniform2f(u.u_sourceSize, this.imageWidth, this.imageHeight);
+    gl.uniform3f(u.u_lensK, lens.k1, lens.k2, lens.k3);
+    gl.uniform1f(u.u_lensStrength, lens.distortionStrength);
+    gl.uniform2f(u.u_lensKeystone, lens.keystoneH, lens.keystoneV);
 
     gl.uniform1f(u.globals.brightness, globals.brightness);
     gl.uniform1f(u.globals.contrast, globals.contrast);

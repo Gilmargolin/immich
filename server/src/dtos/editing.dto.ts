@@ -29,6 +29,10 @@ export enum AssetEditAction {
   Rotate = 'rotate',
   Mirror = 'mirror',
   Adjust = 'adjust',
+  // Fork-custom: lens-distortion + keystone correction. Auto-resolved
+  // coefficients come from the client's lens-profile lookup; the server just
+  // runs the inverse remap.
+  LensCorrection = 'lensCorrection',
 }
 
 export enum MirrorAxis {
@@ -435,7 +439,71 @@ export class AdjustParameters extends AdjustmentSliders {
   masks?: LocalMask[];
 }
 
-export type AssetEditParameters = CropParameters | RotateParameters | MirrorParameters | AdjustParameters;
+// Fork-custom: combined radial-distortion + perspective-keystone correction.
+// The client resolves (k1, k2, k3) from a lens-profile lookup before sending
+// — the server just runs the inverse remap with whatever coefficients arrive,
+// so the lens-profile DB lives in one place (server JSON) but the apply path
+// stays stateless w.r.t. EXIF.
+export class LensCorrectionParameters {
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({
+    description:
+      'Strength multiplier applied to the auto-resolved profile coefficients (0 = bypass, 1 = full correction). ' +
+      'Does not affect keystone — keystone always uses its own values directly.',
+  })
+  distortionStrength!: number;
+
+  // Radial distortion polynomial coefficients, normalized so that r = 1 is
+  // half the image diagonal. r' = r * (1 + k1·r² + k2·r⁴ + k3·r⁶). These
+  // come from the resolved lens profile on the client; if the lens has no
+  // profile match, all three are zero and the radial pass is a no-op.
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  @ApiProperty({ description: 'Radial distortion coefficient k1 (r² term). 0 disables this term.' })
+  k1!: number;
+
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  @ApiProperty({ description: 'Radial distortion coefficient k2 (r⁴ term). 0 disables this term.' })
+  k2!: number;
+
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  @ApiProperty({ description: 'Radial distortion coefficient k3 (r⁶ term). 0 disables this term.' })
+  k3!: number;
+
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  @ApiProperty({
+    description:
+      'Horizontal keystone (-1 = lean left, 0 = none, 1 = lean right). Applied as a projective transform; ' +
+      'no auto-resolved component — purely user input.',
+  })
+  keystoneH!: number;
+
+  @IsNumber()
+  @Min(-1)
+  @Max(1)
+  @ApiProperty({
+    description:
+      'Vertical keystone (-1 = lean up, 0 = none, 1 = lean down). Applied as a projective transform; ' +
+      'no auto-resolved component — purely user input.',
+  })
+  keystoneV!: number;
+}
+
+export type AssetEditParameters =
+  | CropParameters
+  | RotateParameters
+  | MirrorParameters
+  | AdjustParameters
+  | LensCorrectionParameters;
 export type AssetEditActionItem =
   | {
       action: AssetEditAction.Crop;
@@ -452,18 +520,24 @@ export type AssetEditActionItem =
   | {
       action: AssetEditAction.Adjust;
       parameters: AdjustParameters;
+    }
+  | {
+      action: AssetEditAction.LensCorrection;
+      parameters: LensCorrectionParameters;
     };
 
-@ApiExtraModels(CropParameters, RotateParameters, MirrorParameters, AdjustParameters)
+@ApiExtraModels(CropParameters, RotateParameters, MirrorParameters, AdjustParameters, LensCorrectionParameters)
 export class AssetEditActionItemDto {
   @ValidateEnum({ name: 'AssetEditAction', enum: AssetEditAction, description: 'Type of edit action to perform' })
   action!: AssetEditAction;
 
   @ApiProperty({
-    description: 'List of edit actions to apply (crop, rotate, mirror, or adjust)',
-    anyOf: [CropParameters, RotateParameters, MirrorParameters, AdjustParameters].map((type) => ({
-      $ref: getSchemaPath(type),
-    })),
+    description: 'List of edit actions to apply (crop, rotate, mirror, adjust, or lens correction)',
+    anyOf: [CropParameters, RotateParameters, MirrorParameters, AdjustParameters, LensCorrectionParameters].map(
+      (type) => ({
+        $ref: getSchemaPath(type),
+      }),
+    ),
   })
   @ValidateNested()
   @Type((options) => actionParameterMap[options?.object.action as keyof AssetEditActionParameter])
@@ -481,7 +555,58 @@ const actionParameterMap = {
   [AssetEditAction.Rotate]: RotateParameters,
   [AssetEditAction.Mirror]: MirrorParameters,
   [AssetEditAction.Adjust]: AdjustParameters,
+  [AssetEditAction.LensCorrection]: LensCorrectionParameters,
 };
+
+// Response for GET /assets/:id/lens-profile. Echoes back the EXIF lens info
+// so the client doesn't need a second roundtrip for the caption, plus the
+// resolved polynomial coefficients the client then uses both for live preview
+// (shader uniforms) and for the save payload (LensCorrectionParameters).
+export class AssetLensProfileResponseDto {
+  @IsOptional()
+  @IsString()
+  @ApiProperty({ required: false, description: 'Camera make from EXIF (Sony, Canon, …).' })
+  cameraMake?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @ApiProperty({ required: false, description: 'Camera model from EXIF.' })
+  cameraModel?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @ApiProperty({ required: false, description: 'Lens model from EXIF.' })
+  lensModel?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  @ApiProperty({ required: false, description: 'Focal length in mm from EXIF.' })
+  focalLength?: number | null;
+
+  @IsOptional()
+  @IsString()
+  @ApiProperty({
+    required: false,
+    description: 'Display name of the matched lens profile. Null when no profile matched.',
+  })
+  displayName?: string | null;
+
+  @IsBoolean()
+  @ApiProperty({ description: 'True when a matching profile exists for this lens.' })
+  hasProfile!: boolean;
+
+  @IsNumber()
+  @ApiProperty({ description: 'Radial coefficient k1 (r² term). Zero when hasProfile is false.' })
+  k1!: number;
+
+  @IsNumber()
+  @ApiProperty({ description: 'Radial coefficient k2 (r⁴ term). Zero when hasProfile is false.' })
+  k2!: number;
+
+  @IsNumber()
+  @ApiProperty({ description: 'Radial coefficient k3 (r⁶ term). Zero when hasProfile is false.' })
+  k3!: number;
+}
 
 export class AssetEditsCreateDto {
   @ArrayMinSize(1)

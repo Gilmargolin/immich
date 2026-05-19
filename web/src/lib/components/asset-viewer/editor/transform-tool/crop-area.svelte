@@ -3,6 +3,7 @@
   import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { AdjustGLRenderer, FULL_CROP } from '$lib/managers/edit/adjust-webgl';
+  import { lensCorrectionManager } from '$lib/managers/edit/lens-correction-manager.svelte';
   import { getAssetMediaUrl } from '$lib/utils';
   import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
   import { onDestroy } from 'svelte';
@@ -73,7 +74,12 @@
     pendingCropRaf = requestAnimationFrame(() => {
       pendingCropRaf = null;
       if (cropCanvasRenderer && cropImageReady) {
-        cropCanvasRenderer.render(adjustManager.values, adjustManager.masks, FULL_CROP);
+        cropCanvasRenderer.render(
+          adjustManager.values,
+          adjustManager.masks,
+          FULL_CROP,
+          lensCorrectionManager.shaderUniforms,
+        );
       }
     });
   };
@@ -89,6 +95,12 @@
     void adjustManager.values.whitePoint;
     void adjustManager.values.blackPoint;
     void adjustManager.masks;
+    void lensCorrectionManager.state.distortionStrength;
+    void lensCorrectionManager.state.keystoneH;
+    void lensCorrectionManager.state.keystoneV;
+    void lensCorrectionManager.profile.k1;
+    void lensCorrectionManager.profile.k2;
+    void lensCorrectionManager.profile.k3;
     scheduleCropRender();
   });
 

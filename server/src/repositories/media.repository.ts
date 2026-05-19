@@ -12,6 +12,7 @@ import {
   AdjustParameters,
   AssetEditActionItem,
   BRUSH_MASK_RESOLUTION,
+  LensCorrectionParameters,
   LocalMask,
   LocalMaskKind,
 } from 'src/dtos/editing.dto';
@@ -501,6 +502,197 @@ const applyAdjustments = async (pipeline: sharp.Sharp, params: AdjustParameters)
   return sharp(out, { raw: { width, height, channels } });
 };
 
+// Catmull-Rom cubic kernel (B=0, C=0.5). Sharp without ringing for smooth
+// gradients, which is the dominant content type for typical lens corrections.
+const catmullRom = (t: number): number => {
+  const at = t < 0 ? -t : t;
+  if (at < 1) {
+    return 1.5 * at * at * at - 2.5 * at * at + 1;
+  }
+  if (at < 2) {
+    return -0.5 * at * at * at + 2.5 * at * at - 4 * at + 2;
+  }
+  return 0;
+};
+
+// Bicubic sample (Catmull-Rom) at fractional pixel coordinates. Out-of-range
+// reads return 0 in every channel (transparent black) — the inverse remap may
+// land outside the source rectangle at the corners after correction and we'd
+// rather show a clean black border than mirror or clamp into nearby content.
+//
+// `data` is interleaved RGB or RGBA; `channels` is 3 or 4. Output is written
+// into `out[outOff .. outOff + channels)`.
+const bicubicSample = (
+  data: Buffer | Uint8Array,
+  width: number,
+  height: number,
+  channels: number,
+  x: number,
+  y: number,
+  out: Buffer | Uint8Array,
+  outOff: number,
+): void => {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+
+  // Reject samples whose 4×4 neighborhood is entirely outside the source.
+  if (ix < -1 || iy < -1 || ix > width || iy > height) {
+    out[outOff] = 0;
+    out[outOff + 1] = 0;
+    out[outOff + 2] = 0;
+    if (channels === 4) {
+      out[outOff + 3] = 0;
+    }
+    return;
+  }
+
+  // Pre-compute kernel weights along x and y so the inner loop is just
+  // multiplies + adds.
+  const wx0 = catmullRom(-1 - fx);
+  const wx1 = catmullRom(-fx);
+  const wx2 = catmullRom(1 - fx);
+  const wx3 = catmullRom(2 - fx);
+  const wy0 = catmullRom(-1 - fy);
+  const wy1 = catmullRom(-fy);
+  const wy2 = catmullRom(1 - fy);
+  const wy3 = catmullRom(2 - fy);
+
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  let sumA = 0;
+  let totalWeight = 0;
+
+  const ys = [iy - 1, iy, iy + 1, iy + 2];
+  const ws = [wy0, wy1, wy2, wy3];
+  const xs = [ix - 1, ix, ix + 1, ix + 2];
+  const wxArr = [wx0, wx1, wx2, wx3];
+
+  for (let j = 0; j < 4; j++) {
+    const sy = ys[j];
+    if (sy < 0 || sy >= height) {
+      continue;
+    }
+    const wy = ws[j];
+    const rowBase = sy * width * channels;
+    for (let i = 0; i < 4; i++) {
+      const sx = xs[i];
+      if (sx < 0 || sx >= width) {
+        continue;
+      }
+      const w = wy * wxArr[i];
+      const off = rowBase + sx * channels;
+      sumR += data[off] * w;
+      sumG += data[off + 1] * w;
+      sumB += data[off + 2] * w;
+      if (channels === 4) {
+        sumA += data[off + 3] * w;
+      }
+      totalWeight += w;
+    }
+  }
+
+  if (totalWeight <= 0) {
+    out[outOff] = 0;
+    out[outOff + 1] = 0;
+    out[outOff + 2] = 0;
+    if (channels === 4) {
+      out[outOff + 3] = 0;
+    }
+    return;
+  }
+
+  // Renormalize against the actual covered area so partial-coverage samples at
+  // the source edge don't lose energy.
+  const inv = 1 / totalWeight;
+  const clampByte = (v: number): number => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+  out[outOff] = clampByte(sumR * inv);
+  out[outOff + 1] = clampByte(sumG * inv);
+  out[outOff + 2] = clampByte(sumB * inv);
+  if (channels === 4) {
+    out[outOff + 3] = clampByte(sumA * inv);
+  }
+};
+
+const isLensCorrectionActive = (p: LensCorrectionParameters): boolean => {
+  // Strength gates the radial part; keystone is gated by its own values.
+  const radial = p.distortionStrength > 0 && (p.k1 !== 0 || p.k2 !== 0 || p.k3 !== 0);
+  const keystone = p.keystoneH !== 0 || p.keystoneV !== 0;
+  return radial || keystone;
+};
+
+// Apply lens-distortion + keystone correction by materializing the Sharp
+// pipeline to a raw RGB/RGBA buffer, then for each output pixel computing the
+// source coordinate via an inverse map and bicubic-sampling. Output dimensions
+// match the input — black borders may appear in regions where the inverse map
+// lands outside the source frame; subsequent crop / inscribed-rectangle steps
+// (handled in applyEdits' free-rotation block, when present) clean those up
+// implicitly, but typical lens corrections produce small enough offsets that a
+// follow-up crop is usually unnecessary.
+//
+// Math:
+//   output pixel (u, v)
+//   → normalize (u, v) about image center to coords where r=1 is half-diagonal
+//   → apply keystone (output→source):
+//       x' = x · (1 + keystoneV · y)
+//       y' = y · (1 + keystoneH · x)
+//   → apply radial (undistorted r → distorted r):
+//       factor = 1 + s·(k1·r² + k2·r⁴ + k3·r⁶)
+//       (x'', y'') = (x' · factor, y' · factor)
+//     where s = distortionStrength
+//   → denormalize and sample source bicubically
+const applyLensCorrection = async (
+  pipeline: sharp.Sharp,
+  params: LensCorrectionParameters,
+): Promise<sharp.Sharp> => {
+  if (!isLensCorrectionActive(params)) {
+    return pipeline;
+  }
+
+  const { data, info } = await pipeline.toColorspace('srgb').raw().toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  if (channels < 3) {
+    return sharp(data, { raw: { width, height, channels } });
+  }
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const halfDiag = Math.hypot(cx, cy);
+  const invHalfDiag = 1 / halfDiag;
+  const s = params.distortionStrength;
+  const { k1, k2, k3, keystoneH, keystoneV } = params;
+
+  const out = Buffer.alloc(data.length);
+
+  for (let y = 0; y < height; y++) {
+    const yn = (y - cy) * invHalfDiag;
+    for (let x = 0; x < width; x++) {
+      const xn = (x - cx) * invHalfDiag;
+
+      // Keystone: independent linear shears in normalized coords.
+      const xk = xn * (1 + keystoneV * yn);
+      const yk = yn * (1 + keystoneH * xn);
+
+      // Radial distortion model evaluated forward (undistorted → distorted
+      // source). `s` scales the auto coefficients without touching keystone.
+      const r2 = xk * xk + yk * yk;
+      const r4 = r2 * r2;
+      const r6 = r4 * r2;
+      const factor = 1 + s * (k1 * r2 + k2 * r4 + k3 * r6);
+
+      const xs = cx + xk * factor * halfDiag;
+      const ys = cy + yk * factor * halfDiag;
+
+      const outOff = (y * width + x) * channels;
+      bicubicSample(data, width, height, channels, xs, ys, out, outOff);
+    }
+  }
+
+  return sharp(out, { raw: { width, height, channels } });
+};
+
 @Injectable()
 export class MediaRepository {
   constructor(private logger: LoggingRepository) {
@@ -604,10 +796,20 @@ export class MediaRepository {
   }
 
   private async applyEdits(pipeline: sharp.Sharp, edits: AssetEditActionItem[]): Promise<sharp.Sharp> {
+    const lensCorrectionEdit = edits.find((edit) => edit.action === 'lensCorrection');
     const crop = edits.find((edit) => edit.action === 'crop');
     const rotateEdit = edits.find((edit) => edit.action === 'rotate');
     const mirrorEdits = edits.filter((edit) => edit.action === 'mirror');
     const adjustEdit = edits.find((edit) => edit.action === 'adjust');
+
+    // 0. Apply lens correction on the un-cropped, un-rotated sensor frame.
+    // The radial coefficients are calibrated against the full original image
+    // (r = 1 = half image diagonal), so any crop / rotate before this would
+    // misalign the correction. Crop / rotate that follow operate on the
+    // already-undistorted output unchanged.
+    if (lensCorrectionEdit) {
+      pipeline = await applyLensCorrection(pipeline, lensCorrectionEdit.parameters);
+    }
 
     // 1. Apply crop
     if (crop) {

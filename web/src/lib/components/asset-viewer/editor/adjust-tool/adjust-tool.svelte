@@ -1,9 +1,13 @@
 <script lang="ts">
   import { adjustManager, type AdjustmentValues } from '$lib/managers/edit/adjust-manager.svelte';
+  import { lensCorrectionManager } from '$lib/managers/edit/lens-correction-manager.svelte';
   import { t } from 'svelte-i18n';
   import {
+    mdiArrowExpandHorizontal,
+    mdiArrowExpandVertical,
     mdiBrightness6,
     mdiBrushOutline,
+    mdiCamera,
     mdiCircle,
     mdiCircleOutline,
     mdiContrastCircle,
@@ -12,6 +16,7 @@
     mdiPalette,
     mdiPlus,
     mdiThermometer,
+    mdiTune,
     mdiWaterOutline,
     mdiWeatherNight,
     mdiWhiteBalanceSunny,
@@ -43,6 +48,17 @@
   let selectedIndex = $derived(adjustManager.selectedMaskIndex);
   let masks = $derived(adjustManager.masks);
   let active = $derived(adjustManager.activeSliders);
+
+  // Lens correction caption: pretty-print the matched profile or fall back to
+  // the raw EXIF lens model when the lens isn't in the bundled DB.
+  let lensCaption = $derived.by(() => {
+    const p = lensCorrectionManager.profile;
+    const name = p.displayName ?? p.lensModel ?? null;
+    if (!name) {
+      return p.cameraMake || p.cameraModel ? `${p.cameraMake ?? ''} ${p.cameraModel ?? ''}`.trim() : null;
+    }
+    return p.focalLength ? `${name} · ${Math.round(p.focalLength)}mm` : name;
+  });
 
   const maskLabel = (mask: { kind: 'linear' | 'radial' | 'brush' }, i: number): string => {
     const kindNames = { linear: 'Linear', radial: 'Radial', brush: 'Brush' };
@@ -176,6 +192,54 @@
       </div>
     </div>
   {/if}
+
+  <!-- Lens Correction sub-section. Sits inside the Adjust panel so it's a
+       peer of Light / Color, but operates on geometry rather than tone. -->
+  <div class="mt-3 border-t border-gray-200 dark:border-gray-700 pt-3">
+    <div class="flex h-8 w-full items-center justify-between text-xs uppercase tracking-wide text-gray-400">
+      <div class="flex items-center gap-1">
+        <Icon icon={mdiCamera} size="14" />
+        <span>Lens Correction</span>
+      </div>
+      {#if lensCorrectionManager.profile.hasProfile}
+        <span class="rounded bg-immich-primary/20 px-1.5 py-0.5 text-[10px] text-immich-primary normal-case tracking-normal">
+          auto
+        </span>
+      {/if}
+    </div>
+    {#if lensCaption}
+      <div class="px-1 pb-1 text-[11px] text-gray-400 truncate" title={lensCaption}>{lensCaption}</div>
+    {/if}
+    {#if !lensCorrectionManager.profile.hasProfile}
+      <div class="px-1 pb-1 text-[11px] text-gray-500 italic">
+        {lensCorrectionManager.profile.lensModel
+          ? 'No profile for this lens — keystone still works.'
+          : 'No lens EXIF — keystone still works.'}
+      </div>
+    {/if}
+    <div class:opacity-50={!lensCorrectionManager.profile.hasProfile}>
+      <AdjustSlider
+        icon={mdiTune}
+        label="Distortion"
+        value={lensCorrectionManager.state.distortionStrength}
+        min={0}
+        max={1}
+        onchange={(v) => lensCorrectionManager.setDistortionStrength(v)}
+      />
+    </div>
+    <AdjustSlider
+      icon={mdiArrowExpandHorizontal}
+      label="Keystone H"
+      value={lensCorrectionManager.state.keystoneH}
+      onchange={(v) => lensCorrectionManager.setKeystoneH(v)}
+    />
+    <AdjustSlider
+      icon={mdiArrowExpandVertical}
+      label="Keystone V"
+      value={lensCorrectionManager.state.keystoneV}
+      onchange={(v) => lensCorrectionManager.setKeystoneV(v)}
+    />
+  </div>
 
   <!-- Light sliders -->
   <div class="flex h-10 w-full items-center justify-between text-sm mt-2">

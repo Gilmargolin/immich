@@ -20,7 +20,7 @@ import {
   UpdateAssetDto,
 } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
-import { AssetEditsCreateDto, AssetEditsResponseDto } from 'src/dtos/editing.dto';
+import { AssetEditsCreateDto, AssetEditsResponseDto, AssetLensProfileResponseDto } from 'src/dtos/editing.dto';
 import { IdentifyResponseDto } from 'src/dtos/identify.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import { ApiTag, Permission, RouteKey } from 'src/enum';
@@ -276,5 +276,17 @@ export class AssetController {
   })
   removeAssetEdits(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
     return this.service.removeAssetEdits(auth, id);
+  }
+
+  @Get(':id/lens-profile')
+  @Authenticated({ permission: Permission.AssetRead })
+  @Endpoint({
+    summary: 'Get the resolved lens-correction profile for an asset',
+    description:
+      'Looks up the asset\'s lens (from EXIF) in the vendored lens-profile database and returns the radial-distortion coefficients used by the editor\'s Lens Correction tool. Returns hasProfile=false when no matching lens is found; the camera/lens EXIF fields are still echoed back so the editor can render the gear caption.',
+    history: new HistoryBuilder().added('v2.5.0').beta('v2.5.0'),
+  })
+  getAssetLensProfile(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<AssetLensProfileResponseDto> {
+    return this.service.getLensProfile(auth, id);
   }
 }

@@ -22,7 +22,13 @@ import {
   mapStats,
 } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
-import { AssetEditAction, AssetEditActionItem, AssetEditsCreateDto, AssetEditsResponseDto } from 'src/dtos/editing.dto';
+import {
+  AssetEditAction,
+  AssetEditActionItem,
+  AssetEditsCreateDto,
+  AssetEditsResponseDto,
+  AssetLensProfileResponseDto,
+} from 'src/dtos/editing.dto';
 import { IdentifyResponseDto, IdentifyResultDto } from 'src/dtos/identify.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import {
@@ -50,6 +56,7 @@ import {
 } from 'src/utils/asset.util';
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
+import { resolveLensProfile } from 'src/utils/lens-profile';
 import { transformOcrBoundingBox } from 'src/utils/transform';
 
 @Injectable()
@@ -721,6 +728,38 @@ export class AssetService extends BaseService {
     return {
       assetId: id,
       edits: newEdits,
+    };
+  }
+
+  // Resolve the lens-correction profile (camera + lens + focal length →
+  // radial distortion coefficients) for an asset. The web editor calls this
+  // once when the editor opens so it can populate the Lens Correction
+  // sub-section's gear caption AND feed the same coefficients into the
+  // live-preview shader AND the save payload (LensCorrectionParameters).
+  async getLensProfile(auth: AuthDto, id: string): Promise<AssetLensProfileResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
+
+    const asset = await this.assetRepository.getById(id, { exifInfo: true });
+    if (!asset) {
+      throw new BadRequestException('Asset not found');
+    }
+
+    const exif = asset.exifInfo;
+    const resolved = resolveLensProfile({
+      lensModel: exif?.lensModel ?? null,
+      focalLength: exif?.focalLength ?? null,
+    });
+
+    return {
+      cameraMake: exif?.make ?? null,
+      cameraModel: exif?.model ?? null,
+      lensModel: exif?.lensModel ?? null,
+      focalLength: exif?.focalLength ?? null,
+      displayName: resolved.displayName,
+      hasProfile: resolved.hasProfile,
+      k1: resolved.k1,
+      k2: resolved.k2,
+      k3: resolved.k3,
     };
   }
 
