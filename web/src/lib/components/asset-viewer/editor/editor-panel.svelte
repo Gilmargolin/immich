@@ -27,7 +27,6 @@
     mdiArrowExpandHorizontal,
     mdiArrowExpandVertical,
     mdiBrightness6,
-    mdiCamera,
     mdiCheckboxBlankOutline,
     mdiCheckboxMarked,
     mdiContrastCircle,
@@ -595,37 +594,18 @@
       />
     {/each}
 
-    <!-- Lens Correction. Lives at the bottom of the Adjust pane — it operates
-         on geometry (un-curl barrel/pincushion from the lens, fix converging
-         verticals) rather than tone, so it's conceptually separate from
-         Light/Color. The "Auto" row is a real toggle: ON = apply the lens
-         profile's correction at full strength, OFF = bypass. Keystone is
-         always manual. Derived state (lensProfile, lensCaption, focalText,
-         autoOn) is defined in the script section. -->
-    <h2
-      class="text-xs font-medium text-gray-400 uppercase tracking-wide mt-4 mb-1 flex items-center gap-1 border-t border-gray-700 pt-3"
-    >
-      <Icon icon={mdiCamera} size="14" />
-      <span>Lens Correction</span>
+    <!-- Lens Correction. Bottom of the Adjust pane — geometric corrections
+         (lens-profile distortion + manual keystone). Auto button is a real
+         on/off toggle: flips strength between 0 and 1. -->
+    <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mt-4 mb-1 border-t border-gray-700 pt-3">
+      Lens Correction
     </h2>
-    <div class="px-1 pb-1 text-[11px] text-gray-400">
-      Straightens curves from the lens (auto-detected) and lets you fix converging verticals (keystone).
-    </div>
     {#if lensCaption}
       <div class="px-1 pb-2 text-[11px] text-gray-500 italic truncate" title={`${lensCaption}${focalText}`}>
         {lensCaption}{focalText}
       </div>
-    {:else}
-      <div class="px-1 pb-2 text-[11px] text-gray-500 italic">No lens EXIF for this photo.</div>
     {/if}
 
-    <!-- Auto on/off — explicit binary state so it's obvious whether the
-         profile correction is being applied. Clicking toggles between
-         strength = 1 (full correction) and strength = 0 (bypass). The
-         strength slider below is for fine-tuning; the user can still drag
-         it to a partial value, but the toggle is what most users will
-         interact with. Disabled when no profile matched (still permits
-         manual Keystone). -->
     <button
       type="button"
       class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs disabled:cursor-default"
@@ -635,22 +615,14 @@
       class:opacity-50={!lensProfile.hasProfile}
       disabled={!lensProfile.hasProfile}
       onclick={toggleAutoCorrection}
-      title={lensProfile.hasProfile
-        ? autoOn
-          ? 'Auto correction is ON — click to disable'
-          : 'Click to apply the profile correction'
-        : 'No profile available for this lens'}
     >
       <Icon icon={autoOn && lensProfile.hasProfile ? mdiCheckboxMarked : mdiCheckboxBlankOutline} size="16" />
-      <span class="flex-1 text-start">Auto-correct lens distortion</span>
+      <span class="flex-1 text-start">Auto</span>
       <span class="text-[10px] uppercase tracking-wide opacity-80">
         {!lensProfile.hasProfile ? 'no profile' : autoOn ? 'on' : 'off'}
       </span>
     </button>
 
-    <!-- Strength slider — fine-tune the auto correction. Visually muted when
-         the toggle is OFF so users don't mistakenly think a non-zero value
-         here means the correction is active. -->
     <div class:opacity-40={!autoOn || !lensProfile.hasProfile}>
       <AdjustSlider
         icon={mdiTune}
