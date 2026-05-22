@@ -20,7 +20,12 @@ import {
   UpdateAssetDto,
 } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
-import { AssetEditsCreateDto, AssetEditsResponseDto, AssetLensProfileResponseDto } from 'src/dtos/editing.dto';
+import {
+  AssetEditsCreateDto,
+  AssetEditsResponseDto,
+  AssetLensProfileResponseDto,
+  AssetSubjectDetectionResponseDto,
+} from 'src/dtos/editing.dto';
 import { IdentifyResponseDto } from 'src/dtos/identify.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import { ApiTag, Permission, RouteKey } from 'src/enum';
@@ -288,5 +293,20 @@ export class AssetController {
   })
   getAssetLensProfile(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<AssetLensProfileResponseDto> {
     return this.service.getLensProfile(auth, id);
+  }
+
+  @Post(':id/detect-subjects')
+  @Authenticated({ permission: Permission.AssetEditCreate })
+  @Endpoint({
+    summary: 'Auto-detect subjects in an asset and return per-subject masks',
+    description:
+      'Runs the bundled YOLO + SlimSAM pipeline on the asset to detect subjects (people, animals, vehicles). Returns one 512×512 grayscale-PNG mask per subject (ranked main / secondary / other), plus a "background" mask covering everything that is not a detected subject. Each mask drops directly into a new BrushMask record so the editor can refine with the existing brush +/- tool. Inference is CPU-bound, typically 1–3 seconds per photo on first call (cold model load) and ~1 second thereafter.',
+    history: new HistoryBuilder().added('v2.5.0').beta('v2.5.0'),
+  })
+  detectAssetSubjects(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+  ): Promise<AssetSubjectDetectionResponseDto> {
+    return this.service.detectAssetSubjects(auth, id);
   }
 }

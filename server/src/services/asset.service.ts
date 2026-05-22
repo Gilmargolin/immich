@@ -28,6 +28,8 @@ import {
   AssetEditsCreateDto,
   AssetEditsResponseDto,
   AssetLensProfileResponseDto,
+  AssetSubjectDetectionResponseDto,
+  SubjectRole,
 } from 'src/dtos/editing.dto';
 import { IdentifyResponseDto, IdentifyResultDto } from 'src/dtos/identify.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
@@ -57,6 +59,7 @@ import {
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
 import { resolveLensProfile } from 'src/utils/lens-profile';
+import { detectSubjects } from 'src/utils/subject-detection';
 import { transformOcrBoundingBox } from 'src/utils/transform';
 
 @Injectable()
@@ -760,6 +763,47 @@ export class AssetService extends BaseService {
       k1: resolved.k1,
       k2: resolved.k2,
       k3: resolved.k3,
+    };
+  }
+
+  // Run YOLO + SlimSAM on an asset and return one mask per detected subject
+  // (plus a "background = NOT union" mask). The web editor calls this from
+  // the Masks → Auto Subject button; each returned mask drops straight into
+  // a new BrushMask record on the client so the user can refine with the
+  // existing brush +/- tool.
+  async detectAssetSubjects(auth: AuthDto, id: string): Promise<AssetSubjectDetectionResponseDto> {
+    // Same permission as editAsset — running detection is the prep step for
+    // creating a destructive edit.
+    await this.requireAccess({ auth, permission: Permission.AssetEditCreate, ids: [id] });
+
+    const asset = await this.assetRepository.getById(id, { files: true });
+    if (!asset) {
+      throw new BadRequestException('Asset not found');
+    }
+    if (asset.type !== AssetType.Image) {
+      throw new BadRequestException('Subject detection is only supported on images');
+    }
+
+    // Prefer the FullSize derivative (always a web-readable JPEG/PNG even when
+    // the original is RAW). Fall back to originalPath for assets that don't
+    // have a derivative yet — Sharp can read those if they're already JPEG/PNG.
+    const { fullsizeFile } = getAssetFiles(asset.files ?? []);
+    const imagePath = fullsizeFile?.path ?? asset.originalPath;
+    if (!imagePath) {
+      throw new BadRequestException('Asset has no readable image file');
+    }
+
+    const result = await detectSubjects(imagePath);
+
+    return {
+      subjects: result.subjects.map((s) => ({
+        id: s.id,
+        className: s.className,
+        role: s.role as unknown as SubjectRole, // string-enum values match
+        confidence: s.confidence,
+        maskDataUrl: s.maskDataUrl,
+      })),
+      backgroundMaskDataUrl: result.backgroundMaskDataUrl,
     };
   }
 

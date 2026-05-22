@@ -558,6 +558,60 @@ const actionParameterMap = {
   [AssetEditAction.LensCorrection]: LensCorrectionParameters,
 };
 
+export enum SubjectRole {
+  Main = 'main',
+  Secondary = 'secondary',
+  Other = 'other',
+}
+
+// One detected subject as returned by POST /assets/:id/detect-subjects.
+// The maskDataUrl is a 512×512 grayscale PNG suitable to drop straight into
+// a new BrushMask record on the client.
+export class DetectedSubjectDto {
+  @IsString()
+  @ApiProperty({ description: 'Stable per-response id (e.g. "subject-0"). Used as a list key by the client.' })
+  id!: string;
+
+  @IsString()
+  @ApiProperty({ description: 'COCO class name of the detected subject (person, dog, car, …).' })
+  className!: string;
+
+  @ValidateEnum({ name: 'SubjectRole', enum: SubjectRole, description: 'Ranking role for this subject in the detection result.' })
+  role!: SubjectRole;
+
+  @IsNumber()
+  @ApiProperty({ description: 'Detection confidence in [0, 1] from the instance detector.' })
+  confidence!: number;
+
+  @IsString()
+  @ApiProperty({
+    description:
+      'Pre-painted brush-mask payload: a 512×512 grayscale PNG encoded as a data URL (`data:image/png;base64,...`). ' +
+      'Drop directly into `BrushMask.mask` to create a new mask layer for this subject.',
+  })
+  maskDataUrl!: string;
+}
+
+@ApiExtraModels(DetectedSubjectDto)
+export class AssetSubjectDetectionResponseDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => DetectedSubjectDto)
+  @ApiProperty({
+    type: [DetectedSubjectDto],
+    description: 'Detected subjects in the photo, ordered by salience (main → secondary → other). Capped at 5 entries.',
+  })
+  subjects!: DetectedSubjectDto[];
+
+  @IsString()
+  @ApiProperty({
+    description:
+      '512×512 grayscale PNG data URL for the "background" mask — the complement of every detected subject. ' +
+      'When no subjects are detected, this is a fully-white mask covering the whole image.',
+  })
+  backgroundMaskDataUrl!: string;
+}
+
 // Response for GET /assets/:id/lens-profile. Echoes back the EXIF lens info
 // so the client doesn't need a second roundtrip for the caption, plus the
 // resolved polynomial coefficients the client then uses both for live preview

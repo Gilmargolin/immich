@@ -1116,6 +1116,23 @@ export type AssetLensProfileResponseDto = {
     k2: number;
     k3: number;
 };
+export type DetectedSubjectDto = {
+    /** Stable per-response id (e.g. "subject-0"). */
+    id: string;
+    /** COCO class name (person, dog, car, ...). */
+    className: string;
+    /** Ranking role for this subject. */
+    role: SubjectRole;
+    /** Detection confidence in [0, 1]. */
+    confidence: number;
+    /** 512×512 grayscale PNG as a data URL. */
+    maskDataUrl: string;
+};
+export type AssetSubjectDetectionResponseDto = {
+    subjects: DetectedSubjectDto[];
+    /** Complement of every detected subject; whole-image when subjects is empty. */
+    backgroundMaskDataUrl: string;
+};
 export type IdentifyResultDto = {
     commonName?: string | null;
     iconicTaxon: string;
@@ -4346,6 +4363,20 @@ export function getAssetLensProfile({ id }: {
     }));
 }
 /**
+ * Auto-detect subjects in an asset and return per-subject masks.
+ */
+export function detectAssetSubjects({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetSubjectDetectionResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/detect-subjects`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
  * Identify subject in asset
  */
 export function identifyAssetSubject({ id }: {
@@ -7287,6 +7318,11 @@ export enum LocalMaskKind {
     Linear = "linear",
     Radial = "radial",
     Brush = "brush"
+}
+export enum SubjectRole {
+    Main = "main",
+    Secondary = "secondary",
+    Other = "other"
 }
 export enum AssetMediaSize {
     Original = "original",

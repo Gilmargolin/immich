@@ -346,6 +346,29 @@ export class AdjustManager implements EditToolManager {
     this.pendingMaskKind = null;
   }
 
+  // Add a brush mask whose pixels were pre-painted by the AI subject-detection
+  // pipeline (Masks → Auto Subject). The data URL must already be a 512×512
+  // grayscale PNG — same format the brush overlay produces — so it round-trips
+  // through the existing decode path in media.repository.ts without
+  // re-encoding. Returns the new mask's index, or null if at capacity.
+  addSubjectMask(maskDataUrl: string): number | null {
+    if (this.masks.length >= 8) {
+      return null;
+    }
+    const mask: LocalMask = {
+      kind: 'brush',
+      mask: maskDataUrl,
+      params: { ...defaultValues },
+    };
+    this.masks = [...this.masks, mask];
+    const idx = this.masks.length - 1;
+    this.selectedMaskIndex = idx;
+    // Don't enter geometry-edit mode on AI masks — they're already shaped
+    // correctly; the user picks the brush button explicitly to refine them.
+    this.editingMaskIndex = null;
+    return idx;
+  }
+
   // Called by the overlay on pointerup. cx/cy in normalized image-W/H.
   // rx/ry already converted to the DTO's min(W, H)-relative units by the
   // overlay (which owns the aspect ratio knowledge).
