@@ -27,8 +27,6 @@
     mdiArrowExpandHorizontal,
     mdiArrowExpandVertical,
     mdiBrightness6,
-    mdiCheckboxBlankOutline,
-    mdiCheckboxMarked,
     mdiContrastCircle,
     mdiWaterOutline,
     mdiThermometer,
@@ -139,14 +137,6 @@
   let lensProfile = $derived(lensCorrectionManager.profile);
   let lensCaption = $derived(lensProfile.displayName ?? lensProfile.lensModel ?? null);
   let focalText = $derived(lensProfile.focalLength ? ` · ${Math.round(lensProfile.focalLength)}mm` : '');
-  // "Auto correction is on" === strength > 0. Click the toggle to flip
-  // between 0 (bypass) and 1 (full); the strength slider lets the user
-  // fine-tune in-between.
-  let autoOn = $derived(lensCorrectionManager.state.distortionStrength > 0);
-  function toggleAutoCorrection() {
-    if (!lensProfile.hasProfile) return;
-    lensCorrectionManager.setDistortionStrength(autoOn ? 0 : 1);
-  }
 
   interface AspectRatioOption {
     label: string;
@@ -595,35 +585,19 @@
     {/each}
 
     <!-- Lens Correction. Bottom of the Adjust pane — geometric corrections
-         (lens-profile distortion + manual keystone). Auto button is a real
-         on/off toggle: flips strength between 0 and 1. -->
+         (lens-profile distortion + manual keystone). Strength is the
+         on/off control: 0 = bypass, anything > 0 applies the profile's
+         coefficients scaled by the slider value. -->
     <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mt-4 mb-1 border-t border-gray-700 pt-3">
       Lens Correction
     </h2>
     {#if lensCaption}
       <div class="px-1 pb-2 text-[11px] text-gray-500 italic truncate" title={`${lensCaption}${focalText}`}>
-        {lensCaption}{focalText}
+        {lensCaption}{focalText}{lensProfile.hasProfile ? '' : ' · no profile'}
       </div>
     {/if}
 
-    <button
-      type="button"
-      class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs disabled:cursor-default"
-      class:bg-immich-primary={autoOn && lensProfile.hasProfile}
-      class:text-immich-bg={autoOn && lensProfile.hasProfile}
-      class:hover:bg-immich-bg-hover={!autoOn && lensProfile.hasProfile}
-      class:opacity-50={!lensProfile.hasProfile}
-      disabled={!lensProfile.hasProfile}
-      onclick={toggleAutoCorrection}
-    >
-      <Icon icon={autoOn && lensProfile.hasProfile ? mdiCheckboxMarked : mdiCheckboxBlankOutline} size="16" />
-      <span class="flex-1 text-start">Auto</span>
-      <span class="text-[10px] uppercase tracking-wide opacity-80">
-        {!lensProfile.hasProfile ? 'no profile' : autoOn ? 'on' : 'off'}
-      </span>
-    </button>
-
-    <div class:opacity-40={!autoOn || !lensProfile.hasProfile}>
+    <div class:opacity-40={!lensProfile.hasProfile}>
       <AdjustSlider
         icon={mdiTune}
         label="Strength"
