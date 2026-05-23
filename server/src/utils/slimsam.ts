@@ -185,9 +185,16 @@ export const decodeMaskWithBox = async (
   // Upsample 256 → 1024, then crop to the un-padded content region. The
   // content region is the source image's aspect at SAM's 1024 scale; e.g.
   // for a 3:2 horizontal photo it's roughly 1024 × 683.
+  //
+  // `.toColourspace('b-w')` is load-bearing: Sharp's `.extract()` after
+  // `.resize()` silently promotes a 1-band raw input to 3-band RGB, which
+  // makes `.raw().toBuffer()` emit 3× the expected bytes. Forcing the
+  // libvips colourspace back to b/w (1 band) before raw output guarantees
+  // exactly w*h bytes.
   const contentMask = await sharp(lowRes, { raw: { width: maskSize, height: maskSize, channels: 1 } })
     .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill', kernel: 'nearest' })
     .extract({ left: 0, top: 0, width: enc.contentW, height: enc.contentH })
+    .toColourspace('b-w')
     .raw()
     .toBuffer();
 

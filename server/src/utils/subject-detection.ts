@@ -93,12 +93,16 @@ export const detectSubjects = async (imagePath: string): Promise<SubjectDetectio
 
     // SAM mask at SlimSAM's content resolution (≤ 1024 px, aspect-preserving).
     // Same aspect as the source image, so resizing straight to 512×512 with
-    // "fill" gives a brush-mask-compatible square stretched to fit.
+    // "fill" gives a brush-mask-compatible square stretched to fit. The
+    // `.toColourspace('b-w')` is required: without it Sharp's resize emits
+    // 3-band RGB even though the input was 1-band (same issue as in
+    // slimsam.ts; see decodeMaskWithBox comments).
     const decoded = await decodeMaskWithBox(enc, detection.bbox);
     const mask512Buf = await sharp(Buffer.from(decoded.data), {
       raw: { width: decoded.width, height: decoded.height, channels: 1 },
     })
       .resize(TARGET_SIZE, TARGET_SIZE, { fit: 'fill' })
+      .toColourspace('b-w')
       .raw()
       .toBuffer();
 
