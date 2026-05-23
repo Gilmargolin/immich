@@ -123,26 +123,38 @@ export const encodeImage = async (imageBuffer: Buffer): Promise<EncodedImage> =>
   };
 };
 
+export interface DecodedMask {
+  /** Raw grayscale bytes (0 = background, 255 = foreground), row-major. */
+  data: Uint8Array;
+  /** Width of `data`. Bounded by SlimSAM's 1024-px content region. */
+  width: number;
+  /** Height of `data`. Bounded by SlimSAM's 1024-px content region. */
+  height: number;
+}
+
 /**
- * Decode a binary silhouette at the original image resolution given a
- * bounding-box prompt in original-image pixel coords.
+ * Decode a binary silhouette given a bounding-box prompt in original-image
+ * pixel coords. Returns the mask at SlimSAM's internal content resolution
+ * (≤ 1024×1024, aspect-preserving — same aspect as the source image). The
+ * caller is responsible for any final resize.
  *
- * Returns a Uint8Array of length origW*origH, row-major, where each byte is
- * 0 (background) or 255 (foreground). Threshold is sigmoid(logit) > 0.5,
- * which matches what SAM is trained for.
+ * We deliberately do NOT resize back to the original image resolution here:
+ * (1) the caller usually wants a small thumbnail (e.g. 512×512 for brush
+ *     masks), so a round-trip through tens-of-megapixels is wasteful;
+ * (2) Sharp's chained extract→resize occasionally truncates the output
+ *     buffer when targeting very large dimensions, which broke the v1 of
+ *     this code with a "VipsImage memory area too small" error.
  */
 export const decodeMaskWithBox = async (
   enc: EncodedImage,
   bbox: { x0: number; y0: number; x1: number; y1: number },
-): Promise<Uint8Array> => {
-  // Box coords in original image space → 1024-space.
+): Promise<DecodedMask> => {
   const points = new Float32Array([
     bbox.x0 * enc.scale,
     bbox.y0 * enc.scale,
     bbox.x1 * enc.scale,
     bbox.y1 * enc.scale,
   ]);
-  // Labels: 2 = top-left of box, 3 = bottom-right of box (SAM convention).
   const labels = new BigInt64Array([2n, 3n]);
 
   const decoder = await getDecoder();
@@ -153,8 +165,6 @@ export const decodeMaskWithBox = async (
     input_labels: new ort.Tensor('int64', labels, [1, 1, 2]),
   });
 
-  // pred_masks: [1, 1, 3, 256, 256] logits — three multimask candidates.
-  // iou_scores: [1, 1, 3] predicted quality. Pick the highest-quality candidate.
   const iouScores = out.iou_scores.data as Float32Array;
   let bestIdx = 0;
   for (let i = 1; i < 3; i++) {
@@ -167,22 +177,33 @@ export const decodeMaskWithBox = async (
   const maskSize = 256;
   const offset = bestIdx * maskSize * maskSize;
 
-  // Threshold logits to a binary 256×256 grayscale buffer. SAM is trained so
-  // the decision boundary is at logit = 0 (equivalently sigmoid > 0.5).
   const lowRes = Buffer.alloc(maskSize * maskSize);
   for (let i = 0; i < maskSize * maskSize; i++) {
     lowRes[i] = masks[offset + i] > 0 ? 255 : 0;
   }
 
-  // Upsample 256→1024, crop the un-padded content region (which is
-  // (0,0)-(contentW, contentH) in the 1024 space), then resize to the
-  // original image dimensions.
-  const upsampled = await sharp(lowRes, { raw: { width: maskSize, height: maskSize, channels: 1 } })
+  // Upsample 256 → 1024, then crop to the un-padded content region. The
+  // content region is the source image's aspect at SAM's 1024 scale; e.g.
+  // for a 3:2 horizontal photo it's roughly 1024 × 683.
+  const contentMask = await sharp(lowRes, { raw: { width: maskSize, height: maskSize, channels: 1 } })
     .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill', kernel: 'nearest' })
     .extract({ left: 0, top: 0, width: enc.contentW, height: enc.contentH })
-    .resize(enc.origW, enc.origH, { fit: 'fill' })
     .raw()
     .toBuffer();
 
-  return new Uint8Array(upsampled.buffer, upsampled.byteOffset, upsampled.byteLength);
+  // Defensive check: the buffer should match the requested content dims.
+  // Without this, downstream resizers fail with cryptic "memory area too
+  // small" errors when libvips silently does something unexpected.
+  const expected = enc.contentW * enc.contentH;
+  if (contentMask.byteLength !== expected) {
+    throw new Error(
+      `slimsam: decoded mask buffer size mismatch — got ${contentMask.byteLength}, expected ${expected} (${enc.contentW}×${enc.contentH})`,
+    );
+  }
+
+  return {
+    data: new Uint8Array(contentMask.buffer, contentMask.byteOffset, contentMask.byteLength),
+    width: enc.contentW,
+    height: enc.contentH,
+  };
 };

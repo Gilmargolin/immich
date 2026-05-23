@@ -91,14 +91,12 @@ export const detectSubjects = async (imagePath: string): Promise<SubjectDetectio
           ? 'secondary'
           : 'other';
 
-    // SAM mask at original image resolution (binary 0/255 bytes).
-    const fullRes = await decodeMaskWithBox(enc, detection.bbox);
-
-    // Resize to 512×512 with "fill" (stretches aspect) — brush masks are sampled
-    // in normalized UV across the whole image, so the storage format is always
-    // a square stretched to fit.
-    const mask512Buf = await sharp(Buffer.from(fullRes), {
-      raw: { width: originalSize.w, height: originalSize.h, channels: 1 },
+    // SAM mask at SlimSAM's content resolution (≤ 1024 px, aspect-preserving).
+    // Same aspect as the source image, so resizing straight to 512×512 with
+    // "fill" gives a brush-mask-compatible square stretched to fit.
+    const decoded = await decodeMaskWithBox(enc, detection.bbox);
+    const mask512Buf = await sharp(Buffer.from(decoded.data), {
+      raw: { width: decoded.width, height: decoded.height, channels: 1 },
     })
       .resize(TARGET_SIZE, TARGET_SIZE, { fit: 'fill' })
       .raw()
