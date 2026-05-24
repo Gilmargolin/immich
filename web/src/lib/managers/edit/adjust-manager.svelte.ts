@@ -411,6 +411,66 @@ export class AdjustManager implements EditToolManager {
     this.masks = this.masks.map((m, i) => (i === index ? mask : m));
   }
 
+  // Flip the sense of a mask: pixels that were affected become unaffected and
+  // vice versa. Behaviour depends on mask kind:
+  //   - brush:  decode the PNG → invert greyscale → re-encode (data URL)
+  //   - linear: swap endpoint A and B so the gradient direction flips
+  //   - radial: toggle the existing `invert` boolean
+  //
+  // The async branch (brush) goes through an HTMLCanvas to do the byte flip
+  // entirely client-side — same data path the brush overlay already uses to
+  // re-hydrate masks, so format compatibility is guaranteed.
+  async invertMaskAt(index: number): Promise<void> {
+    const mask = this.masks[index];
+    if (!mask) {
+      return;
+    }
+    if (mask.kind === 'linear') {
+      this.masks = this.masks.map((m, i) =>
+        i === index && m.kind === 'linear' ? { ...m, ax: m.bx, ay: m.by, bx: m.ax, by: m.ay } : m,
+      );
+      return;
+    }
+    if (mask.kind === 'radial') {
+      this.masks = this.masks.map((m, i) =>
+        i === index && m.kind === 'radial' ? { ...m, invert: !m.invert } : m,
+      );
+      return;
+    }
+    if (mask.kind === 'brush') {
+      if (typeof document === 'undefined') {
+        return;
+      }
+      const src = mask.mask;
+      const url = src.startsWith('data:') ? src : `data:image/png;base64,${src}`;
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = BRUSH_MASK_RESOLUTION;
+      canvas.height = BRUSH_MASK_RESOLUTION;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        return;
+      }
+      ctx.drawImage(img, 0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
+      const imgData = ctx.getImageData(0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
+      const data = imgData.data;
+      // The brush-mask PNG is opaque grayscale (R=G=B=value, A=255). Inverting
+      // the grayscale on all three channels keeps alpha intact and produces a
+      // valid round-trip through both the shader's `.r` sample and the
+      // server's `.greyscale()` decode.
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = 255 - data[i];
+        data[i + 1] = 255 - data[i + 1];
+        data[i + 2] = 255 - data[i + 2];
+      }
+      ctx.putImageData(imgData, 0, 0);
+      const inverted = canvas.toDataURL('image/png');
+      this.masks = this.masks.map((m, i) => (i === index && m.kind === 'brush' ? { ...m, mask: inverted } : m));
+    }
+  }
+
   // Set the luminance gate for a mask, clamping to [0, 1] and enforcing
   // lumLow ≤ lumHigh so the server's class-validator never has to reject.
   setLumGate(index: number, lumLow: number, lumHigh: number): void {

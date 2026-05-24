@@ -165,21 +165,68 @@ export const decodeMaskWithBox = async (
     input_labels: new ort.Tensor('int64', labels, [1, 1, 2]),
   });
 
-  const iouScores = out.iou_scores.data as Float32Array;
+  const masks = out.pred_masks.data as Float32Array;
+  const maskSize = 256;
+
+  // Map the prompt bbox into the 256-pixel mask space. The mask covers SAM's
+  // 1024×1024 input, so divide the 1024-space coords by maskSize / INPUT_SIZE.
+  const sx = enc.scale / (INPUT_SIZE / maskSize);
+  const mx0 = Math.max(0, Math.floor(bbox.x0 * sx));
+  const my0 = Math.max(0, Math.floor(bbox.y0 * sx));
+  const mx1 = Math.min(maskSize, Math.ceil(bbox.x1 * sx));
+  const my1 = Math.min(maskSize, Math.ceil(bbox.y1 * sx));
+
+  // For each (candidate × threshold-orientation), score the mask by how much
+  // of its foreground lies inside the prompt box AND how non-tiny the mask
+  // is. Trying both orientations defends against any ONNX export that flipped
+  // the logit-sign convention; the right (candidate, orientation) pair is the
+  // one whose foreground is concentrated inside the user's box.
+  //
+  // The simple IoU-score selection from v1 of this code failed in the field
+  // because SAM's multimask "best IoU" candidate occasionally targets a
+  // sub-part or a wrong region; in-bbox density is empirical and robust.
   let bestIdx = 0;
-  for (let i = 1; i < 3; i++) {
-    if (iouScores[i] > iouScores[bestIdx]) {
-      bestIdx = i;
+  let bestInvert = false;
+  let bestScore = -1;
+  for (let cand = 0; cand < 3; cand++) {
+    const off = cand * maskSize * maskSize;
+    for (const invert of [false, true] as const) {
+      let inBox = 0;
+      let total = 0;
+      for (let y = 0; y < maskSize; y++) {
+        for (let x = 0; x < maskSize; x++) {
+          const logit = masks[off + y * maskSize + x];
+          const isFg = invert ? logit <= 0 : logit > 0;
+          if (!isFg) {
+            continue;
+          }
+          total++;
+          if (x >= mx0 && x < mx1 && y >= my0 && y < my1) {
+            inBox++;
+          }
+        }
+      }
+      if (total === 0) {
+        continue;
+      }
+      // Score: in-bbox ratio weighted by √total so we prefer non-trivial masks
+      // over a 1-pixel speck that happens to land inside the box.
+      const ratio = inBox / total;
+      const score = ratio * Math.sqrt(total);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = cand;
+        bestInvert = invert;
+      }
     }
   }
 
-  const masks = out.pred_masks.data as Float32Array;
-  const maskSize = 256;
   const offset = bestIdx * maskSize * maskSize;
-
   const lowRes = Buffer.alloc(maskSize * maskSize);
   for (let i = 0; i < maskSize * maskSize; i++) {
-    lowRes[i] = masks[offset + i] > 0 ? 255 : 0;
+    const logit = masks[offset + i];
+    const isFg = bestInvert ? logit <= 0 : logit > 0;
+    lowRes[i] = isFg ? 255 : 0;
   }
 
   // Upsample 256 → 1024, then crop to the un-padded content region. The
