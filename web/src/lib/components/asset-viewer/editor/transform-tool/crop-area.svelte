@@ -104,6 +104,26 @@
     scheduleCropRender();
   });
 
+  // Push each brush mask's PNG into its GPU texture slot. Same fix as in
+  // adjust-canvas-preview.svelte — the renderer's uploadBrushMaskFromBase64
+  // was previously never called, so brush masks rendered as fully-transparent
+  // and slider effects didn't show on the masked region in the live preview.
+  $effect(() => {
+    if (!cropCanvasRenderer) {
+      return;
+    }
+    const r = cropCanvasRenderer;
+    const masks = adjustManager.masks;
+    const slots: (string | null)[] = [];
+    for (let i = 0; i < 8; i++) {
+      const m = masks[i];
+      slots.push(m && m.kind === 'brush' ? m.mask : null);
+    }
+    for (let i = 0; i < slots.length; i++) {
+      void r.uploadBrushMaskFromBase64(i, slots[i]).then(() => scheduleCropRender());
+    }
+  });
+
   onDestroy(() => {
     if (pendingCropRaf !== null) {
       cancelAnimationFrame(pendingCropRaf);

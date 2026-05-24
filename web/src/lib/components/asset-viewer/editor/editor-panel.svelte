@@ -169,10 +169,9 @@
       // this state anyway via the maskCapHit derived below.
       return;
     }
-    // Dismiss the Detected panel so it doesn't linger after the chosen mask
-    // is in the masks list — consistent with how Linear/Radial draw modes
-    // exit themselves on commit.
-    subjectDetectionResult = null;
+    // Keep the detected-subjects panel open after Add mask so the user can
+    // add another subject (or the Background) without re-running detection.
+    // The X button in the panel header dismisses it manually.
   }
 
   function subjectLabel(s: DetectedSubjectDto): string {

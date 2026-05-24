@@ -223,10 +223,17 @@ export const decodeMaskWithBox = async (
 
   const offset = bestIdx * maskSize * maskSize;
   const lowRes = Buffer.alloc(maskSize * maskSize);
+  // Use the soft sigmoid value (scaled 0..255) instead of a hard binary
+  // threshold. SAM's logits have a smooth confidence falloff at object
+  // boundaries; a hard cut at 0 turns medium-confidence interior pixels (e.g.
+  // textured fur, fine hair, or specular highlights inside a body) into
+  // black holes that punch through the mask. The brush mask format already
+  // supports grayscale weights, and the downstream brush-overlay + shader
+  // both bilinear-sample, so smooth values look better at every step.
   for (let i = 0; i < maskSize * maskSize; i++) {
-    const logit = masks[offset + i];
-    const isFg = bestInvert ? logit <= 0 : logit > 0;
-    lowRes[i] = isFg ? 255 : 0;
+    const adjusted = bestInvert ? -masks[offset + i] : masks[offset + i];
+    const prob = 1 / (1 + Math.exp(-adjusted));
+    lowRes[i] = Math.round(prob * 255);
   }
 
   // Upsample 256 → 1024, then crop to the un-padded content region. The

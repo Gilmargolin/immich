@@ -151,6 +151,30 @@
     scheduleRender();
   });
 
+  // Push each brush mask's PNG into its GPU texture slot. This was the
+  // missing link that made brush masks (AI-generated AND user-painted)
+  // invisible in the live preview — the shader's brush samplers were
+  // bound to the constructor's 1×1 zero textures so any mask weight
+  // sampled out to 0 and slider effects didn't tint the masked region.
+  // The renderer's internal brushSrcCache de-dupes repeat uploads of the
+  // same PNG, so this is cheap on every reactive tick.
+  $effect(() => {
+    if (!renderer) {
+      return;
+    }
+    const r = renderer;
+    const masks = adjustManager.masks;
+    // Read each mask's PNG eagerly so this $effect re-runs on PNG mutation.
+    const slots: (string | null)[] = [];
+    for (let i = 0; i < 8; i++) {
+      const m = masks[i];
+      slots.push(m && m.kind === 'brush' ? m.mask : null);
+    }
+    for (let i = 0; i < slots.length; i++) {
+      void r.uploadBrushMaskFromBase64(i, slots[i]).then(() => scheduleRender());
+    }
+  });
+
   onMount(() => {
     // canvas is bound via {bind:this} below; the $effect handles init.
   });
