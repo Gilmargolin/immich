@@ -12,7 +12,9 @@ import { decodeMaskWithBox, encodeImage } from 'src/utils/slimsam';
 import { detectInstances } from 'src/utils/yolo-seg';
 
 const TARGET_SIZE = 512; // matches BRUSH_MASK_RESOLUTION in editing.dto.ts
-const MAX_SUBJECTS = 5;
+// Return up to 8 candidates so the web client's Sensitivity slider has range
+// to filter from (without paying for a server re-run on slider drags).
+const MAX_SUBJECTS = 8;
 const SECONDARY_RELATIVE_THRESHOLD = 0.3; // secondary if score ≥ 30% of main's
 
 export type SubjectRole = 'main' | 'secondary' | 'other';

@@ -121,7 +121,11 @@ export const detectInstances = async (
   imageBuffer: Buffer,
   opts: { confThreshold?: number; iouThreshold?: number; subjectsOnly?: boolean } = {},
 ): Promise<{ detections: YoloDetection[]; originalSize: { w: number; h: number } }> => {
-  const confThreshold = opts.confThreshold ?? 0.4;
+  // 0.5 is a good operating point for COCO-trained YOLOv11n on real photos —
+  // 0.4 was letting low-quality detections (distant buildings, off-frame
+  // boats, partial body parts) leak into the results. The web UI's
+  // Sensitivity slider can filter further client-side.
+  const confThreshold = opts.confThreshold ?? 0.5;
   const iouThreshold = opts.iouThreshold ?? 0.5;
   const subjectsOnly = opts.subjectsOnly ?? true;
 

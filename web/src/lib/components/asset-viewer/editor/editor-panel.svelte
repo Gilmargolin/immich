@@ -146,6 +146,22 @@
   let subjectDetectionResult = $state<AssetSubjectDetectionResponseDto | null>(null);
   let subjectDetectionError = $state<string | null>(null);
 
+  // Client-side sensitivity for the detection results. Server returns up to
+  // 8 candidates; the slider filters by confidence relative to the top
+  // candidate's confidence. Default 50% means "show subjects whose confidence
+  // is at least half of the strongest detection's" — that's enough to drop
+  // distant buildings / off-frame boats while keeping the actual subjects.
+  let detectionSensitivity = $state(50);
+  let filteredSubjects = $derived.by(() => {
+    const subjects = subjectDetectionResult?.subjects ?? [];
+    if (subjects.length === 0) {
+      return subjects;
+    }
+    const topConf = Math.max(...subjects.map((s) => s.confidence));
+    const cutoff = (detectionSensitivity / 100) * topConf;
+    return subjects.filter((s) => s.confidence >= cutoff);
+  });
+
   async function runSubjectDetection() {
     if (subjectDetectionRunning) return;
     subjectDetectionRunning = true;
@@ -512,10 +528,32 @@
             <Icon icon={mdiClose} size="12" />
           </button>
         </div>
+        <!-- Sensitivity: filters subjects whose confidence is below
+             (slider% × top-confidence). Higher = stricter (fewer subjects);
+             dragging right hides borderline detections like a distant
+             building or a partially-visible boat in the corner. -->
+        {#if subjectDetectionResult.subjects.length > 0}
+          <div class="mb-1 flex items-center gap-2 px-1 text-[10px] text-gray-400">
+            <span class="w-16 shrink-0">Sensitivity</span>
+            <input
+              type="range"
+              min="0"
+              max="90"
+              step="5"
+              bind:value={detectionSensitivity}
+              class="flex-1 h-1 accent-immich-primary cursor-pointer"
+              aria-label="Detection sensitivity"
+              title="Higher = stricter (fewer subjects shown)"
+            />
+            <span class="w-8 text-end tabular-nums">{detectionSensitivity}%</span>
+          </div>
+        {/if}
         {#if subjectDetectionResult.subjects.length === 0}
           <div class="px-1 pb-1 text-[11px] italic text-gray-500">No subjects detected.</div>
+        {:else if filteredSubjects.length === 0}
+          <div class="px-1 pb-1 text-[11px] italic text-gray-500">All detections filtered out — lower sensitivity.</div>
         {/if}
-        {#each subjectDetectionResult.subjects as subject (subject.id)}
+        {#each filteredSubjects as subject (subject.id)}
           <div class="mb-0.5 flex items-center gap-2 rounded px-2 py-1 text-xs text-gray-300">
             <Icon icon={mdiImageFilterCenterFocus} size="14" />
             <span class="flex-1 truncate" title={subjectLabel(subject)}>{subjectLabel(subject)}</span>
