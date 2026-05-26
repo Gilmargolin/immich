@@ -1133,6 +1133,20 @@ export type AssetSubjectDetectionResponseDto = {
     /** Complement of every detected subject; whole-image when subjects is empty. */
     backgroundMaskDataUrl: string;
 };
+export type AssetSegmentFromBoxDto = {
+    /** Box top-left x in [0, 1] */
+    x0: number;
+    /** Box top-left y in [0, 1] */
+    y0: number;
+    /** Box bottom-right x in [0, 1] */
+    x1: number;
+    /** Box bottom-right y in [0, 1] */
+    y1: number;
+};
+export type AssetSegmentResponseDto = {
+    /** 512×512 grayscale PNG silhouette as a data URL. */
+    maskDataUrl: string;
+};
 export type IdentifyResultDto = {
     commonName?: string | null;
     iconicTaxon: string;
@@ -4375,6 +4389,22 @@ export function detectAssetSubjects({ id }: {
         ...opts,
         method: "POST"
     }));
+}
+/**
+ * Interactive SAM segmentation from a user-drawn box.
+ */
+export function segmentAssetFromBox({ id, assetSegmentFromBoxDto }: {
+    id: string;
+    assetSegmentFromBoxDto: AssetSegmentFromBoxDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetSegmentResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/segment-from-box`, oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: assetSegmentFromBoxDto
+    })));
 }
 /**
  * Identify subject in asset

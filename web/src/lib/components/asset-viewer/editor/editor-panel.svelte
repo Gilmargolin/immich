@@ -6,13 +6,7 @@
   import { lensCorrectionManager } from '$lib/managers/edit/lens-correction-manager.svelte';
   import { transformManager } from '$lib/managers/edit/transform-manager.svelte';
   import { websocketEvents } from '$lib/stores/websocket';
-  import {
-    detectAssetSubjects,
-    getAssetEdits,
-    type AssetResponseDto,
-    type AssetSubjectDetectionResponseDto,
-    type DetectedSubjectDto,
-  } from '@immich/sdk';
+  import { getAssetEdits, type AssetResponseDto } from '@immich/sdk';
   import { Button, HStack, Icon, IconButton, toastManager } from '@immich/ui';
   import {
     mdiAutoFix,
@@ -25,7 +19,6 @@
     mdiFlipHorizontal,
     mdiFlipVertical,
     mdiGradientHorizontal,
-    mdiImageFilterCenterFocus,
     mdiInvertColors,
     mdiLoading,
     mdiPencilOutline,
@@ -139,63 +132,6 @@
   ];
 
   let isRotated = $derived(transformManager.normalizedRotation % 180 !== 0);
-
-  // Auto-subject detection state. Transient per editor session — not stored
-  // anywhere; the chosen subject mask gets persisted as a regular brush mask.
-  let subjectDetectionRunning = $state(false);
-  let subjectDetectionResult = $state<AssetSubjectDetectionResponseDto | null>(null);
-  let subjectDetectionError = $state<string | null>(null);
-
-  // Client-side sensitivity for the detection results. Server returns up to
-  // 8 candidates; the slider filters by confidence relative to the top
-  // candidate's confidence. Default 50% means "show subjects whose confidence
-  // is at least half of the strongest detection's" — that's enough to drop
-  // distant buildings / off-frame boats while keeping the actual subjects.
-  let detectionSensitivity = $state(50);
-  let filteredSubjects = $derived.by(() => {
-    const subjects = subjectDetectionResult?.subjects ?? [];
-    if (subjects.length === 0) {
-      return subjects;
-    }
-    const topConf = Math.max(...subjects.map((s) => s.confidence));
-    const cutoff = (detectionSensitivity / 100) * topConf;
-    return subjects.filter((s) => s.confidence >= cutoff);
-  });
-
-  async function runSubjectDetection() {
-    if (subjectDetectionRunning) return;
-    subjectDetectionRunning = true;
-    subjectDetectionError = null;
-    subjectDetectionResult = null;
-    try {
-      exitCropMode();
-      subjectDetectionResult = await detectAssetSubjects({ id: asset.id });
-    } catch (error) {
-      console.error('Subject detection failed', error);
-      subjectDetectionError = 'Detection failed. Try a different photo or retry.';
-    } finally {
-      subjectDetectionRunning = false;
-    }
-  }
-
-  function addSubjectAsMask(maskDataUrl: string) {
-    const idx = adjustManager.addSubjectMask(maskDataUrl);
-    if (idx === null) {
-      // 8-mask cap hit. Quiet failure — the buttons should be disabled in
-      // this state anyway via the maskCapHit derived below.
-      return;
-    }
-    // Keep the detected-subjects panel open after Add mask so the user can
-    // add another subject (or the Background) without re-running detection.
-    // The X button in the panel header dismisses it manually.
-  }
-
-  function subjectLabel(s: DetectedSubjectDto): string {
-    const cap = s.className.charAt(0).toUpperCase() + s.className.slice(1);
-    if (s.role === 'main') return `${cap} (main)`;
-    if (s.role === 'secondary') return `${cap} (secondary)`;
-    return cap;
-  }
 
   let maskCapHit = $derived(adjustManager.masks.length >= 8);
 
@@ -493,95 +429,41 @@
         </button>
         <button
           type="button"
-          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onclick={runSubjectDetection}
-          disabled={maskCapHit || subjectDetectionRunning}
-          aria-label="Auto-detect subjects and create silhouette masks"
-          title="Detect people / animals / vehicles and create a pixel-accurate mask for each"
+          class="flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed
+            {adjustManager.pendingMaskKind === 'subject-box'
+            ? 'bg-immich-primary text-black'
+            : 'text-gray-300 hover:text-white'}"
+          onclick={() => {
+            if (adjustManager.pendingMaskKind === 'subject-box') {
+              adjustManager.cancelDrawingMask();
+            } else {
+              exitCropMode();
+              adjustManager.startDrawingMask('subject-box');
+            }
+          }}
+          disabled={maskCapHit || adjustManager.segmentInFlight}
+          aria-label="Smart subject — draw a box around the subject and SAM creates the silhouette"
+          title="Click, then drag a box around the subject. The AI fills in the exact silhouette."
         >
-          <Icon icon={subjectDetectionRunning ? mdiLoading : mdiAutoFix} size="14" />
-          <span>Auto</span>
+          <Icon icon={adjustManager.segmentInFlight ? mdiLoading : mdiAutoFix} size="14" />
+          <span>Smart</span>
         </button>
       </div>
     </div>
 
-    <!-- Auto-subject detection results. Sub-panel under the buttons that lists
-         each detected subject + a "Background" row. Each row has an Add-mask
-         button that creates a regular brush mask pre-filled with the AI
-         silhouette — the user can then refine with the existing brush tool. -->
-    {#if subjectDetectionError}
-      <div class="mb-2 rounded bg-red-900/30 px-2 py-1 text-[11px] text-red-300">
-        {subjectDetectionError}
-      </div>
-    {/if}
-    {#if subjectDetectionResult}
-      <div class="mb-2 rounded border border-gray-700 p-2">
-        <div class="mb-1 flex items-center justify-between">
-          <span class="text-[11px] uppercase tracking-wide text-gray-400">Detected</span>
-          <button
-            type="button"
-            class="rounded p-0.5 text-gray-400 hover:bg-gray-700 hover:text-white"
-            onclick={() => (subjectDetectionResult = null)}
-            aria-label="Dismiss detection results"
-            title="Dismiss"
-          >
-            <Icon icon={mdiClose} size="12" />
-          </button>
-        </div>
-        <!-- Sensitivity: filters subjects whose confidence is below
-             (slider% × top-confidence). Higher = stricter (fewer subjects);
-             dragging right hides borderline detections like a distant
-             building or a partially-visible boat in the corner. -->
-        {#if subjectDetectionResult.subjects.length > 0}
-          <div class="mb-1 flex items-center gap-2 px-1 text-[10px] text-gray-400">
-            <span class="w-16 shrink-0">Sensitivity</span>
-            <input
-              type="range"
-              min="0"
-              max="90"
-              step="5"
-              bind:value={detectionSensitivity}
-              class="flex-1 h-1 accent-immich-primary cursor-pointer"
-              aria-label="Detection sensitivity"
-              title="Higher = stricter (fewer subjects shown)"
-            />
-            <span class="w-8 text-end tabular-nums">{detectionSensitivity}%</span>
-          </div>
-        {/if}
-        {#if subjectDetectionResult.subjects.length === 0}
-          <div class="px-1 pb-1 text-[11px] italic text-gray-500">No subjects detected.</div>
-        {:else if filteredSubjects.length === 0}
-          <div class="px-1 pb-1 text-[11px] italic text-gray-500">All detections filtered out — lower sensitivity.</div>
-        {/if}
-        {#each filteredSubjects as subject (subject.id)}
-          <div class="mb-0.5 flex items-center gap-2 rounded px-2 py-1 text-xs text-gray-300">
-            <Icon icon={mdiImageFilterCenterFocus} size="14" />
-            <span class="flex-1 truncate" title={subjectLabel(subject)}>{subjectLabel(subject)}</span>
-            <span class="text-[10px] text-gray-500 tabular-nums">{Math.round(subject.confidence * 100)}%</span>
-            <button
-              type="button"
-              class="rounded px-2 py-0.5 text-[11px] text-immich-primary hover:bg-immich-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-              onclick={() => addSubjectAsMask(subject.maskDataUrl)}
-              disabled={maskCapHit}
-              aria-label={`Add mask for ${subject.className}`}
-            >
-              Add mask
-            </button>
-          </div>
-        {/each}
-        <div class="mb-0.5 flex items-center gap-2 rounded px-2 py-1 text-xs text-gray-300 border-t border-gray-700 mt-1 pt-2">
-          <Icon icon={mdiInvertColors} size="14" />
-          <span class="flex-1 truncate">Background (all but subjects)</span>
-          <button
-            type="button"
-            class="rounded px-2 py-0.5 text-[11px] text-immich-primary hover:bg-immich-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            onclick={() => addSubjectAsMask(subjectDetectionResult!.backgroundMaskDataUrl)}
-            disabled={maskCapHit}
-            aria-label="Add background mask"
-          >
-            Add mask
-          </button>
-        </div>
+    <!-- Smart Subject error feedback. Box-drag flows through adjustManager;
+         errors from the SAM endpoint surface here. -->
+    {#if adjustManager.segmentError}
+      <div class="mb-2 flex items-center gap-2 rounded bg-red-900/30 px-2 py-1 text-[11px] text-red-300">
+        <span class="flex-1">{adjustManager.segmentError}</span>
+        <button
+          type="button"
+          class="rounded p-0.5 text-red-300 hover:bg-red-900/50"
+          onclick={() => (adjustManager.segmentError = null)}
+          aria-label="Dismiss error"
+        >
+          <Icon icon={mdiClose} size="12" />
+        </button>
       </div>
     {/if}
 

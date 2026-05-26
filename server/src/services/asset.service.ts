@@ -28,6 +28,8 @@ import {
   AssetEditsCreateDto,
   AssetEditsResponseDto,
   AssetLensProfileResponseDto,
+  AssetSegmentFromBoxDto,
+  AssetSegmentResponseDto,
   AssetSubjectDetectionResponseDto,
   SubjectRole,
 } from 'src/dtos/editing.dto';
@@ -59,7 +61,7 @@ import {
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
 import { resolveLensProfile } from 'src/utils/lens-profile';
-import { detectSubjects } from 'src/utils/subject-detection';
+import { detectSubjects, segmentFromBox } from 'src/utils/subject-detection';
 import { transformOcrBoundingBox } from 'src/utils/transform';
 
 @Injectable()
@@ -805,6 +807,33 @@ export class AssetService extends BaseService {
       })),
       backgroundMaskDataUrl: result.backgroundMaskDataUrl,
     };
+  }
+
+  // Interactive SAM segmentation from a user-drawn bounding box. The web
+  // editor's Smart-Subject draw mode sends the box on pointerup; the
+  // returned mask drops straight into a new BrushMask record.
+  async segmentAssetFromBox(auth: AuthDto, id: string, dto: AssetSegmentFromBoxDto): Promise<AssetSegmentResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.AssetEditCreate, ids: [id] });
+
+    if (dto.x1 <= dto.x0 || dto.y1 <= dto.y0) {
+      throw new BadRequestException('Box must satisfy x1 > x0 and y1 > y0');
+    }
+
+    const asset = await this.assetRepository.getById(id, { files: true });
+    if (!asset) {
+      throw new BadRequestException('Asset not found');
+    }
+    if (asset.type !== AssetType.Image) {
+      throw new BadRequestException('Segmentation is only supported on images');
+    }
+
+    const { fullsizeFile } = getAssetFiles(asset.files ?? []);
+    const imagePath = fullsizeFile?.path ?? asset.originalPath;
+    if (!imagePath) {
+      throw new BadRequestException('Asset has no readable image file');
+    }
+
+    return segmentFromBox(imagePath, { x0: dto.x0, y0: dto.y0, x1: dto.x1, y1: dto.y1 });
   }
 
   async removeAssetEdits(auth: AuthDto, id: string): Promise<void> {

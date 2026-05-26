@@ -108,7 +108,15 @@ export class AdjustManager implements EditToolManager {
   editingMaskIndex = $state<number | null>(null);
   // When set, the next click-drag on the photo creates a mask of this kind
   // (Lightroom-style draw flow). null = drawing inactive.
-  pendingMaskKind = $state<'linear' | 'radial' | 'brush' | null>(null);
+  // 'subject-box' is the Smart Subject mode: user drags a box, server
+  // SAM-segments it, the result becomes a brush mask.
+  pendingMaskKind = $state<'linear' | 'radial' | 'brush' | 'subject-box' | null>(null);
+  // Lifecycle flag for Smart Subject — true between sending the box to the
+  // server and receiving the mask back. The mask-overlay can show a spinner
+  // and disable further input during this window.
+  segmentInFlight = $state(false);
+  // Latest error from a segment-from-box call, surfaced in the editor panel.
+  segmentError = $state<string | null>(null);
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
   private initialMasks = $state<LocalMask[]>([]);
 
@@ -291,11 +299,12 @@ export class AdjustManager implements EditToolManager {
   // Lightroom-style draw flow: arm draw mode and let the overlay component
   // listen for pointer events on the photo. The mask is materialized on
   // pointerup with the user-drawn geometry, not on this call.
-  startDrawingMask(kind: 'linear' | 'radial' | 'brush'): void {
+  startDrawingMask(kind: 'linear' | 'radial' | 'brush' | 'subject-box'): void {
     if (this.masks.length >= 8) {
       return;
     }
     this.pendingMaskKind = kind;
+    this.segmentError = null;
   }
 
   cancelDrawingMask(): void {
@@ -367,6 +376,49 @@ export class AdjustManager implements EditToolManager {
     // correctly; the user picks the brush button explicitly to refine them.
     this.editingMaskIndex = null;
     return idx;
+  }
+
+  // Smart Subject commit: take the user-drawn box (normalized to image W/H,
+  // top-left + bottom-right), POST it to the server's SAM segmentation
+  // endpoint, and on success add the returned silhouette as a brush mask.
+  // Sets/clears segmentInFlight and segmentError so the UI can render
+  // appropriate feedback during the ~1 s server round-trip.
+  async commitDrawnSubjectBox(
+    assetId: string,
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): Promise<void> {
+    if (this.pendingMaskKind !== 'subject-box') {
+      return;
+    }
+    // Normalize ordering and clamp.
+    const nx0 = Math.max(0, Math.min(x0, x1));
+    const ny0 = Math.max(0, Math.min(y0, y1));
+    const nx1 = Math.min(1, Math.max(x0, x1));
+    const ny1 = Math.min(1, Math.max(y0, y1));
+    if (nx1 - nx0 < 0.01 || ny1 - ny0 < 0.01) {
+      // Too small (a stray click) — exit draw mode without erroring.
+      this.pendingMaskKind = null;
+      return;
+    }
+    this.pendingMaskKind = null;
+    this.segmentInFlight = true;
+    this.segmentError = null;
+    try {
+      const { segmentAssetFromBox } = await import('@immich/sdk');
+      const res = await segmentAssetFromBox({
+        id: assetId,
+        assetSegmentFromBoxDto: { x0: nx0, y0: ny0, x1: nx1, y1: ny1 },
+      });
+      this.addSubjectMask(res.maskDataUrl);
+    } catch (error) {
+      console.error('Smart subject segmentation failed', error);
+      this.segmentError = 'Segmentation failed. Try drawing a different box, or retry.';
+    } finally {
+      this.segmentInFlight = false;
+    }
   }
 
   // Called by the overlay on pointerup. cx/cy in normalized image-W/H.

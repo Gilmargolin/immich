@@ -24,6 +24,8 @@ import {
   AssetEditsCreateDto,
   AssetEditsResponseDto,
   AssetLensProfileResponseDto,
+  AssetSegmentFromBoxDto,
+  AssetSegmentResponseDto,
   AssetSubjectDetectionResponseDto,
 } from 'src/dtos/editing.dto';
 import { IdentifyResponseDto } from 'src/dtos/identify.dto';
@@ -308,5 +310,21 @@ export class AssetController {
     @Param() { id }: UUIDParamDto,
   ): Promise<AssetSubjectDetectionResponseDto> {
     return this.service.detectAssetSubjects(auth, id);
+  }
+
+  @Post(':id/segment-from-box')
+  @Authenticated({ permission: Permission.AssetEditCreate })
+  @Endpoint({
+    summary: 'Interactive SAM segmentation from a user-drawn box',
+    description:
+      'Runs SlimSAM with the supplied bounding box as a prompt and returns the pixel-accurate silhouette of whatever is inside. Box coordinates are normalized to [0, 1] of image width / height. Server caches the image embedding per asset for ~30 minutes so repeated boxes on the same photo are near-instant (~50 ms each); first call on a fresh asset is ~700 ms.',
+    history: new HistoryBuilder().added('v2.5.0').beta('v2.5.0'),
+  })
+  segmentAssetFromBox(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: AssetSegmentFromBoxDto,
+  ): Promise<AssetSegmentResponseDto> {
+    return this.service.segmentAssetFromBox(auth, id, dto);
   }
 }

@@ -8,7 +8,7 @@
 
 import { promises as fs } from 'node:fs';
 import sharp from 'sharp';
-import { decodeMaskWithBox, encodeImage } from 'src/utils/slimsam';
+import { decodeMaskWithBox, encodeImage, type EncodedImage } from 'src/utils/slimsam';
 import { detectInstances } from 'src/utils/yolo-seg';
 
 const TARGET_SIZE = 512; // matches BRUSH_MASK_RESOLUTION in editing.dto.ts
@@ -41,6 +41,81 @@ export interface SubjectDetectionResult {
 const grayscaleToPngDataUrl = async (buffer: Buffer, w: number, h: number): Promise<string> => {
   const png = await sharp(buffer, { raw: { width: w, height: h, channels: 1 } }).png().toBuffer();
   return `data:image/png;base64,${png.toString('base64')}`;
+};
+
+// Tiny LRU cache of SlimSAM image embeddings keyed by asset path + mtime.
+// Encoding is the expensive part (~700 ms CPU); a single user box-drawing
+// session typically generates several segment calls on the same image, so
+// caching the embeddings makes the 2nd+ box near-instant. Capped at 4 entries
+// so a busy editor session doesn't blow up resident memory (~50 MB per
+// cached encoding).
+type CacheEntry = { key: string; enc: EncodedImage };
+const ENC_CACHE_LIMIT = 4;
+const encCache: CacheEntry[] = [];
+
+const getOrEncode = async (imagePath: string): Promise<EncodedImage> => {
+  const stat = await fs.stat(imagePath);
+  const key = `${imagePath}@${stat.mtimeMs}`;
+  const hit = encCache.find((c) => c.key === key);
+  if (hit) {
+    // LRU bump.
+    encCache.splice(encCache.indexOf(hit), 1);
+    encCache.push(hit);
+    return hit.enc;
+  }
+  const imageBuffer = await fs.readFile(imagePath);
+  const enc = await encodeImage(imageBuffer);
+  encCache.push({ key, enc });
+  while (encCache.length > ENC_CACHE_LIMIT) {
+    encCache.shift();
+  }
+  return enc;
+};
+
+// Resize a single-band mask buffer to 512×512 grayscale PNG and return as a
+// data URL — same format as detectSubjects so it drops into BrushMask.mask.
+const maskToBrushDataUrl = async (data: Uint8Array, width: number, height: number): Promise<string> => {
+  const resized = await sharp(Buffer.from(data), {
+    raw: { width, height, channels: 1 },
+  })
+    .resize(TARGET_SIZE, TARGET_SIZE, { fit: 'fill' })
+    .toColourspace('b-w')
+    .raw()
+    .toBuffer();
+  const png = await sharp(resized, { raw: { width: TARGET_SIZE, height: TARGET_SIZE, channels: 1 } }).png().toBuffer();
+  return `data:image/png;base64,${png.toString('base64')}`;
+};
+
+/**
+ * Interactive segmentation: take a user-drawn bounding box on the photo and
+ * return the SAM silhouette of whatever's inside that box. Unlike
+ * detectSubjects this does NOT run YOLO — the user's box IS the subject
+ * prompt, so there's no class-filter or salience ranking step.
+ *
+ * `box` is in NORMALIZED image coords (each component in [0, 1] relative to
+ * original image dimensions). The web client computes this from the user's
+ * pointer drag on the photo.
+ */
+export const segmentFromBox = async (
+  imagePath: string,
+  box: { x0: number; y0: number; x1: number; y1: number },
+): Promise<{ maskDataUrl: string }> => {
+  const enc = await getOrEncode(imagePath);
+
+  // Convert normalized box to original-image pixel coords (SlimSAM's
+  // decodeMaskWithBox expects pixels, then internally rescales to its
+  // 1024-input space).
+  const x0 = Math.max(0, box.x0 * enc.origW);
+  const y0 = Math.max(0, box.y0 * enc.origH);
+  const x1 = Math.min(enc.origW, box.x1 * enc.origW);
+  const y1 = Math.min(enc.origH, box.y1 * enc.origH);
+  if (x1 - x0 < 1 || y1 - y0 < 1) {
+    throw new Error('Box is degenerate (zero width or height)');
+  }
+
+  const decoded = await decodeMaskWithBox(enc, { x0, y0, x1, y1 });
+  const maskDataUrl = await maskToBrushDataUrl(decoded.data, decoded.width, decoded.height);
+  return { maskDataUrl };
 };
 
 export const detectSubjects = async (imagePath: string): Promise<SubjectDetectionResult> => {

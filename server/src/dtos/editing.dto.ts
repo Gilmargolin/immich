@@ -592,6 +592,46 @@ export class DetectedSubjectDto {
   maskDataUrl!: string;
 }
 
+// Request body for POST /assets/:id/segment-from-box. The four fields are
+// normalized [0,1] image coordinates from the user's drag on the photo —
+// the server scales them to the original-image space and feeds them to
+// SlimSAM as a box prompt.
+export class AssetSegmentFromBoxDto {
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Box top-left x in [0, 1] (fraction of image width)' })
+  x0!: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Box top-left y in [0, 1] (fraction of image height)' })
+  y0!: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Box bottom-right x in [0, 1]' })
+  x1!: number;
+
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @ApiProperty({ description: 'Box bottom-right y in [0, 1]' })
+  y1!: number;
+}
+
+export class AssetSegmentResponseDto {
+  @IsString()
+  @ApiProperty({
+    description:
+      '512×512 grayscale PNG silhouette data URL of whatever was inside the prompt box. ' +
+      'Soft-thresholded so the boundary is anti-aliased; drop straight into a new BrushMask.mask.',
+  })
+  maskDataUrl!: string;
+}
+
 @ApiExtraModels(DetectedSubjectDto)
 export class AssetSubjectDetectionResponseDto {
   @IsArray()

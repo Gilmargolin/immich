@@ -1,6 +1,7 @@
 <script lang="ts">
   import { adjustManager } from '$lib/managers/edit/adjust-manager.svelte';
   import type { LinearMask, LocalMask, RadialMask } from '$lib/managers/edit/adjust-webgl';
+  import { editManager } from '$lib/managers/edit/edit-manager.svelte';
   import { onDestroy } from 'svelte';
   import BrushOverlay from './brush-overlay.svelte';
 
@@ -341,6 +342,15 @@
     }, 250);
     if (pendingKind === 'linear') {
       adjustManager.commitDrawnLinearMask(start.nx, start.ny, cur.nx, cur.ny);
+    } else if (pendingKind === 'subject-box') {
+      // Smart Subject: send the box to the server, async. The async work
+      // (segmentInFlight) shows its own spinner; we exit draw mode here.
+      const assetId = editManager.currentAsset?.id;
+      if (!assetId) {
+        adjustManager.cancelDrawingMask();
+        return;
+      }
+      void adjustManager.commitDrawnSubjectBox(assetId, start.nx, start.ny, cur.nx, cur.ny);
     } else {
       // Convert pixel-space radius from drag → DTO's min(W,H)-relative units.
       const minDim = Math.min(svgWidth, svgHeight);
@@ -485,6 +495,20 @@
     const dyPx = (drawCurrent.ny - drawStart.ny) * svgHeight;
     const r = Math.hypot(dxPx, dyPx);
     return { cx, cy, rx: r, ry: r };
+  });
+
+  // Subject-box preview rectangle drawn while the user is dragging in Smart
+  // Subject mode. Same input → previewBox commits to the SAM endpoint on
+  // pointerup.
+  let previewSubjectBox = $derived.by(() => {
+    if (pendingKind !== 'subject-box' || !drawStart || !drawCurrent) {
+      return null;
+    }
+    const x = Math.min(drawStart.nx, drawCurrent.nx) * svgWidth;
+    const y = Math.min(drawStart.ny, drawCurrent.ny) * svgHeight;
+    const w = Math.abs(drawCurrent.nx - drawStart.nx) * svgWidth;
+    const h = Math.abs(drawCurrent.ny - drawStart.ny) * svgHeight;
+    return { x, y, w, h };
   });
 </script>
 
@@ -833,11 +857,28 @@
       <circle cx={pr.cx} cy={pr.cy} r="3" fill="rgba(255,255,255,0.8)" stroke="rgba(0,0,0,0.3)" stroke-width="1" pointer-events="none" />
     {/if}
 
+    {#if previewSubjectBox}
+      {@const pb = previewSubjectBox}
+      <!-- Subject-box preview while user drags. Dashed outline so it reads as
+           a SELECTION tool (transient), not a mask shape. -->
+      <rect
+        x={pb.x}
+        y={pb.y}
+        width={pb.w}
+        height={pb.h}
+        fill="rgba(99, 102, 241, 0.15)"
+        stroke="rgba(165, 180, 252, 0.95)"
+        stroke-width="2"
+        stroke-dasharray="6 4"
+        pointer-events="none"
+      />
+    {/if}
+
     <!-- Draw-mode hint (shown before the user clicks). Brush mode owns its
        own UI (size slider) so we hide this banner there. -->
     {#if pendingKind && pendingKind !== 'brush' && !drawStart}
       <g pointer-events="none">
-        <rect x={svgWidth / 2 - 140} y="20" width="280" height="32" rx="6" fill="rgba(0, 0, 0, 0.7)" />
+        <rect x={svgWidth / 2 - 160} y="20" width="320" height="32" rx="6" fill="rgba(0, 0, 0, 0.7)" />
         <text
           x={svgWidth / 2}
           y="40"
@@ -846,7 +887,28 @@
           font-size="13"
           font-family="system-ui, sans-serif"
         >
-          {pendingKind === 'linear' ? 'Click and drag to draw the gradient' : 'Click and drag from center outward'}
+          {pendingKind === 'linear'
+            ? 'Click and drag to draw the gradient'
+            : pendingKind === 'radial'
+              ? 'Click and drag from center outward'
+              : 'Drag a box around the subject'}
+        </text>
+      </g>
+    {/if}
+
+    <!-- Working spinner while SAM segmentation is in flight. -->
+    {#if adjustManager.segmentInFlight}
+      <g pointer-events="none">
+        <rect x={svgWidth / 2 - 90} y="20" width="180" height="32" rx="6" fill="rgba(0, 0, 0, 0.7)" />
+        <text
+          x={svgWidth / 2}
+          y="40"
+          text-anchor="middle"
+          fill="white"
+          font-size="13"
+          font-family="system-ui, sans-serif"
+        >
+          Segmenting…
         </text>
       </g>
     {/if}
