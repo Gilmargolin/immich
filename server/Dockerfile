@@ -13,6 +13,14 @@ FROM builder AS server
 
 WORKDIR /usr/src/app
 COPY ./server ./server/
+# SAM-L (vit-large) quantized ONNX is 310 MB — too big to commit to git
+# (>100 MB GitHub per-file limit), so we fetch it from Hugging Face during
+# image build and drop it into the same resources/ dir that pnpm deploy
+# preserves. The much smaller decoder (~5 MB) is committed directly.
+# The fp32 export is 1.2 GB and 4× slower on CPU; the int8-quantized variant
+# is the sweet spot for SAM-L quality at a tolerable image size.
+RUN curl -fsSL -o /usr/src/app/server/resources/sam-vit-large-encoder-quantized.onnx \
+  "https://huggingface.co/Xenova/sam-vit-large/resolve/main/onnx/vision_encoder_quantized.onnx"
 RUN --mount=type=cache,id=pnpm-server,target=/buildcache/pnpm-store \
   --mount=type=bind,source=package.json,target=package.json \
   --mount=type=bind,source=.pnpmfile.cjs,target=.pnpmfile.cjs \

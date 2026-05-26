@@ -1,11 +1,20 @@
-// SlimSAM (Segment Anything, pruned ~50 MB variant) inference. The encoder
-// turns an image into two 256×64×64 embedding tensors; the decoder takes
-// those plus a box prompt and returns 256×256 mask logits.
+// SAM-L (Segment Anything, ViT-Large) inference with int8-quantized weights.
+// The encoder turns an image into two 256×64×64 embedding tensors; the
+// decoder takes those plus point/box prompts and returns 256×256 mask
+// logits.
 //
-// Models (vendored in server/resources/):
-//   - slimsam-vision-encoder.onnx (~22 MB)
-//   - slimsam-decoder.onnx (~16 MB)
-// Both come from huggingface.co/Xenova/slimsam-77-uniform.
+// Models (in server/resources/):
+//   - sam-vit-large-encoder-quantized.onnx (~310 MB, gitignored —
+//     pulled from HF at Docker build time)
+//   - sam-vit-large-decoder-quantized.onnx (~5 MB, committed)
+// Both come from huggingface.co/Xenova/sam-vit-large.
+//
+// We previously used SlimSAM-77 (a heavily-distilled 77M-param variant),
+// which was small + fast but subject identification was visibly weaker — it
+// would often pick partial silhouettes or get confused by complex scenes.
+// SAM-L is the 308M-param "large" variant; the int8-quantized export
+// matches the fp32's quality within ~1-2% IoU while being ~4× smaller and
+// ~2-4× faster on CPU.
 //
 // I/O shapes (verified via probe):
 //   encoder.pixel_values:                [1, 3, 1024, 1024] float32
@@ -24,8 +33,8 @@ import * as ort from 'onnxruntime-node';
 import path from 'node:path';
 import sharp from 'sharp';
 
-const ENCODER_PATH = path.resolve(__dirname, '../../resources/slimsam-vision-encoder.onnx');
-const DECODER_PATH = path.resolve(__dirname, '../../resources/slimsam-decoder.onnx');
+const ENCODER_PATH = path.resolve(__dirname, '../../resources/sam-vit-large-encoder-quantized.onnx');
+const DECODER_PATH = path.resolve(__dirname, '../../resources/sam-vit-large-decoder-quantized.onnx');
 const INPUT_SIZE = 1024;
 // ImageNet normalization stats (the HF preprocessor's defaults).
 const MEAN = [0.485, 0.456, 0.406];

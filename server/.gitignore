@@ -44,3 +44,9 @@ core
 .reverse-geocoding-dump/
 
 **/node_modules/**
+
+# SAM-L quantized encoder (~310 MB) — too large for GitHub's 100 MB per-file
+# limit. Pulled from Hugging Face by the curl step in server/Dockerfile at
+# image build time. Developers needing to run the server locally must
+# download it themselves to server/resources/.
+/resources/sam-vit-large-encoder-quantized.onnx
