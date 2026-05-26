@@ -217,9 +217,17 @@ export const decodeMaskWithBox = async (
     lowRes[i] = Math.round(prob * 255);
   }
 
-  // Upsample 256 → 1024, then crop to the un-padded content region. The
-  // content region is the source image's aspect at SAM's 1024 scale; e.g.
-  // for a 3:2 horizontal photo it's roughly 1024 × 683.
+  // Upsample 256 → 1024 with smooth interpolation, then crop to the un-padded
+  // content region. The content region is the source image's aspect at SAM's
+  // 1024 scale; e.g. for a 3:2 horizontal photo it's roughly 1024 × 683.
+  //
+  // Sharp's default kernel (lanczos3) is what we want here — equivalent in
+  // spirit to the bilinear interpolate_4d that Transformers.js's
+  // `post_process_masks` uses. The v1 of this code passed `kernel: 'nearest'`
+  // (preserving exact byte values), which left visible 256×256 block edges
+  // in the final mask when stretched onto a multi-megapixel photo. The
+  // sigmoid mask is already continuous-valued, so smooth resampling is the
+  // right call.
   //
   // `.toColourspace('b-w')` is load-bearing: Sharp's `.extract()` after
   // `.resize()` silently promotes a 1-band raw input to 3-band RGB, which
@@ -227,7 +235,7 @@ export const decodeMaskWithBox = async (
   // libvips colourspace back to b/w (1 band) before raw output guarantees
   // exactly w*h bytes.
   const contentMask = await sharp(lowRes, { raw: { width: maskSize, height: maskSize, channels: 1 } })
-    .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill', kernel: 'nearest' })
+    .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill' })
     .extract({ left: 0, top: 0, width: enc.contentW, height: enc.contentH })
     .toColourspace('b-w')
     .raw()
