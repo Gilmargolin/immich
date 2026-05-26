@@ -175,64 +175,45 @@ export const decodeMaskWithBox = async (
   const my0 = Math.max(0, Math.floor(bbox.y0 * sx));
   const mx1 = Math.min(maskSize, Math.ceil(bbox.x1 * sx));
   const my1 = Math.min(maskSize, Math.ceil(bbox.y1 * sx));
+  const boxArea = Math.max(1, (mx1 - mx0) * (my1 - my0));
 
-  // For each (candidate × threshold-orientation), score the mask by how much
-  // of its foreground lies inside the prompt box AND how non-tiny the mask
-  // is. Trying both orientations defends against any ONNX export that flipped
-  // the logit-sign convention; the right (candidate, orientation) pair is the
-  // one whose foreground is concentrated inside the user's box.
+  // Pick the multimask candidate whose foreground is most concentrated inside
+  // the user's box. Trust SAM's natural convention (logit > 0 = foreground);
+  // an earlier "try both orientations" auto-flip was over-aggressive on real
+  // photos and produced inverted masks — when SAM mis-prompts, the user's
+  // explicit Invert button is the right escape hatch.
   //
-  // The simple IoU-score selection from v1 of this code failed in the field
-  // because SAM's multimask "best IoU" candidate occasionally targets a
-  // sub-part or a wrong region; in-bbox density is empirical and robust.
+  // Score = (fg inside box) / (box area)  — the fraction of the prompt box
+  // that's claimed by this candidate's foreground. Always picks the candidate
+  // that actually fills the user's selection, regardless of how much
+  // foreground bleeds outside.
   let bestIdx = 0;
-  let bestInvert = false;
   let bestScore = -1;
   for (let cand = 0; cand < 3; cand++) {
     const off = cand * maskSize * maskSize;
-    for (const invert of [false, true] as const) {
-      let inBox = 0;
-      let total = 0;
-      for (let y = 0; y < maskSize; y++) {
-        for (let x = 0; x < maskSize; x++) {
-          const logit = masks[off + y * maskSize + x];
-          const isFg = invert ? logit <= 0 : logit > 0;
-          if (!isFg) {
-            continue;
-          }
-          total++;
-          if (x >= mx0 && x < mx1 && y >= my0 && y < my1) {
-            inBox++;
-          }
+    let inBox = 0;
+    for (let y = my0; y < my1; y++) {
+      const row = off + y * maskSize;
+      for (let x = mx0; x < mx1; x++) {
+        if (masks[row + x] > 0) {
+          inBox++;
         }
       }
-      if (total === 0) {
-        continue;
-      }
-      // Score: in-bbox ratio weighted by √total so we prefer non-trivial masks
-      // over a 1-pixel speck that happens to land inside the box.
-      const ratio = inBox / total;
-      const score = ratio * Math.sqrt(total);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIdx = cand;
-        bestInvert = invert;
-      }
+    }
+    const score = inBox / boxArea;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = cand;
     }
   }
 
   const offset = bestIdx * maskSize * maskSize;
   const lowRes = Buffer.alloc(maskSize * maskSize);
-  // Use the soft sigmoid value (scaled 0..255) instead of a hard binary
-  // threshold. SAM's logits have a smooth confidence falloff at object
-  // boundaries; a hard cut at 0 turns medium-confidence interior pixels (e.g.
-  // textured fur, fine hair, or specular highlights inside a body) into
-  // black holes that punch through the mask. The brush mask format already
-  // supports grayscale weights, and the downstream brush-overlay + shader
-  // both bilinear-sample, so smooth values look better at every step.
+  // Soft sigmoid → 0..255 grayscale. Anti-aliased boundary preserves SAM's
+  // confidence falloff at edges (hair, fur, edges of clothing) instead of
+  // punching holes where the model is medium-confident.
   for (let i = 0; i < maskSize * maskSize; i++) {
-    const adjusted = bestInvert ? -masks[offset + i] : masks[offset + i];
-    const prob = 1 / (1 + Math.exp(-adjusted));
+    const prob = 1 / (1 + Math.exp(-masks[offset + i]));
     lowRes[i] = Math.round(prob * 255);
   }
 
