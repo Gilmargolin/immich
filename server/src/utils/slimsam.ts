@@ -149,61 +149,58 @@ export const decodeMaskWithBox = async (
   enc: EncodedImage,
   bbox: { x0: number; y0: number; x1: number; y1: number },
 ): Promise<DecodedMask> => {
-  const points = new Float32Array([
-    bbox.x0 * enc.scale,
-    bbox.y0 * enc.scale,
-    bbox.x1 * enc.scale,
-    bbox.y1 * enc.scale,
-  ]);
-  const labels = new BigInt64Array([2n, 3n]);
+  // SlimSAM (the distilled / pruned SAM variant we ship) handles point
+  // prompts far more reliably than box prompts in practice — its HF model
+  // card's only example uses a single positive point, and our field testing
+  // with the box-label convention (labels 2 & 3 at the two corners) kept
+  // returning partial or inverted silhouettes on real portraits.
+  //
+  // So we convert the user's box → a small grid of positive points covering
+  // the box interior. Five points (centre + 4 quarter-positions) gives SAM
+  // enough signal to lock onto the whole subject when the user drags around
+  // it, while still treating the geometry as a "box selection" from the
+  // user's perspective.
+  const cx = (bbox.x0 + bbox.x1) / 2;
+  const cy = (bbox.y0 + bbox.y1) / 2;
+  const qx0 = bbox.x0 + (bbox.x1 - bbox.x0) * 0.25;
+  const qx1 = bbox.x0 + (bbox.x1 - bbox.x0) * 0.75;
+  const qy0 = bbox.y0 + (bbox.y1 - bbox.y0) * 0.25;
+  const qy1 = bbox.y0 + (bbox.y1 - bbox.y0) * 0.75;
+  const promptPoints: [number, number][] = [
+    [cx, cy],
+    [qx0, qy0],
+    [qx1, qy0],
+    [qx0, qy1],
+    [qx1, qy1],
+  ];
+  const points = new Float32Array(promptPoints.length * 2);
+  for (let i = 0; i < promptPoints.length; i++) {
+    points[i * 2] = promptPoints[i][0] * enc.scale;
+    points[i * 2 + 1] = promptPoints[i][1] * enc.scale;
+  }
+  // All 5 points are positive (foreground) — label 1 per SAM convention.
+  const labels = new BigInt64Array(promptPoints.length).fill(1n);
 
   const decoder = await getDecoder();
   const out = await decoder.run({
     image_embeddings: enc.imageEmbeddings,
     image_positional_embeddings: enc.imagePositionalEmbeddings,
-    input_points: new ort.Tensor('float32', points, [1, 1, 2, 2]),
-    input_labels: new ort.Tensor('int64', labels, [1, 1, 2]),
+    input_points: new ort.Tensor('float32', points, [1, 1, promptPoints.length, 2]),
+    input_labels: new ort.Tensor('int64', labels, [1, 1, promptPoints.length]),
   });
 
   const masks = out.pred_masks.data as Float32Array;
   const maskSize = 256;
 
-  // Map the prompt bbox into the 256-pixel mask space. The mask covers SAM's
-  // 1024×1024 input, so divide the 1024-space coords by maskSize / INPUT_SIZE.
-  const sx = enc.scale / (INPUT_SIZE / maskSize);
-  const mx0 = Math.max(0, Math.floor(bbox.x0 * sx));
-  const my0 = Math.max(0, Math.floor(bbox.y0 * sx));
-  const mx1 = Math.min(maskSize, Math.ceil(bbox.x1 * sx));
-  const my1 = Math.min(maskSize, Math.ceil(bbox.y1 * sx));
-  const boxArea = Math.max(1, (mx1 - mx0) * (my1 - my0));
-
-  // Pick the multimask candidate whose foreground is most concentrated inside
-  // the user's box. Trust SAM's natural convention (logit > 0 = foreground);
-  // an earlier "try both orientations" auto-flip was over-aggressive on real
-  // photos and produced inverted masks — when SAM mis-prompts, the user's
-  // explicit Invert button is the right escape hatch.
-  //
-  // Score = (fg inside box) / (box area)  — the fraction of the prompt box
-  // that's claimed by this candidate's foreground. Always picks the candidate
-  // that actually fills the user's selection, regardless of how much
-  // foreground bleeds outside.
+  // Pick the candidate with the highest predicted IoU — the convention
+  // recommended by the model card and used by Transformers.js's reference
+  // post-processing. For point prompts, the higher-IoU candidate is usually
+  // the one that captures the whole intended object rather than a sub-part.
+  const iouScores = out.iou_scores.data as Float32Array;
   let bestIdx = 0;
-  let bestScore = -1;
-  for (let cand = 0; cand < 3; cand++) {
-    const off = cand * maskSize * maskSize;
-    let inBox = 0;
-    for (let y = my0; y < my1; y++) {
-      const row = off + y * maskSize;
-      for (let x = mx0; x < mx1; x++) {
-        if (masks[row + x] > 0) {
-          inBox++;
-        }
-      }
-    }
-    const score = inBox / boxArea;
-    if (score > bestScore) {
-      bestScore = score;
-      bestIdx = cand;
+  for (let i = 1; i < 3; i++) {
+    if (iouScores[i] > iouScores[bestIdx]) {
+      bestIdx = i;
     }
   }
 
