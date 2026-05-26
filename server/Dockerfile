@@ -19,8 +19,9 @@ COPY ./server ./server/
 # preserves. The much smaller decoder (~5 MB) is committed directly.
 # The fp32 export is 1.2 GB and 4× slower on CPU; the int8-quantized variant
 # is the sweet spot for SAM-L quality at a tolerable image size.
-RUN curl -fsSL -o /usr/src/app/server/resources/sam-vit-large-encoder-quantized.onnx \
-  "https://huggingface.co/Xenova/sam-vit-large/resolve/main/onnx/vision_encoder_quantized.onnx"
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/* \
+  && curl -fsSL -o /usr/src/app/server/resources/sam-vit-large-encoder-quantized.onnx \
+     "https://huggingface.co/Xenova/sam-vit-large/resolve/main/onnx/vision_encoder_quantized.onnx"
 RUN --mount=type=cache,id=pnpm-server,target=/buildcache/pnpm-store \
   --mount=type=bind,source=package.json,target=package.json \
   --mount=type=bind,source=.pnpmfile.cjs,target=.pnpmfile.cjs \
