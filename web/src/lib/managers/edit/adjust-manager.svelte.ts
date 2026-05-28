@@ -130,6 +130,12 @@ export class AdjustManager implements EditToolManager {
   // before re-encoding, which is equivalent to shifting the binarization
   // threshold up or down in the soft sigmoid's confidence curve.
   smartMaskSize = $state(new Map<number, number>());
+  // Per-mask "hide red overlay" flag. Absent key = visible (the default
+  // immediately after a mask is created). User toggles via the eye icon
+  // next to each mask in the masks list. Decoupled from selectedMaskIndex
+  // so the red overlay no longer auto-hides when the user just selects a
+  // mask to adjust its sliders — the eye is the dedicated control.
+  maskHidden = $state(new Map<number, boolean>());
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
   private initialMasks = $state<LocalMask[]>([]);
 
@@ -247,6 +253,9 @@ export class AdjustManager implements EditToolManager {
     this.selectedMaskIndex = null;
     this.editingMaskIndex = null;
     this.pendingMaskKind = null;
+    this.smartMaskSoft = new Map();
+    this.smartMaskSize = new Map();
+    this.maskHidden = new Map();
     const adjustEdit = edits.find((edit) => edit.action === 'adjust');
     if (adjustEdit) {
       const params = adjustEdit.parameters as AdjustmentValues & { masks?: LocalMask[] };
@@ -275,6 +284,9 @@ export class AdjustManager implements EditToolManager {
     this.selectedMaskIndex = null;
     this.editingMaskIndex = null;
     this.pendingMaskKind = null;
+    this.smartMaskSoft = new Map();
+    this.smartMaskSize = new Map();
+    this.maskHidden = new Map();
   }
 
   setValue(key: keyof AdjustmentValues, value: number) {
@@ -283,13 +295,13 @@ export class AdjustManager implements EditToolManager {
       this.masks = this.masks.map((m, i) =>
         i === idx ? ({ ...m, params: { ...m.params, [key]: value } } as LocalMask) : m,
       );
-      // Once the user starts adjusting sliders for a mask, hide the red
-      // affected-area overlay — they've already seen where it applies and the
-      // overlay just gets in the way of judging the result. Pencil button
-      // re-enters geometry edit on demand.
-      if (this.editingMaskIndex === idx) {
-        this.editingMaskIndex = null;
-      }
+      // Note: we deliberately do NOT auto-clear editingMaskIndex here. The
+      // pencil button is the sole toggle for geometry-edit mode; previously
+      // every slider drag silently exited edit mode, which made the pencil
+      // button feel broken (click to exit → state was already cleared by
+      // your last slider tweak → click did nothing visible). The new eye
+      // icon next to each mask is the dedicated control for hiding the red
+      // overlay independent of edit mode.
       return;
     }
     this.values = { ...this.values, [key]: value };
@@ -543,6 +555,7 @@ export class AdjustManager implements EditToolManager {
     };
     this.smartMaskSoft = reindex(this.smartMaskSoft);
     this.smartMaskSize = reindex(this.smartMaskSize);
+    this.maskHidden = reindex(this.maskHidden);
   }
 
   updateMask(index: number, mask: LocalMask): void {
@@ -647,6 +660,13 @@ export class AdjustManager implements EditToolManager {
       this.editingMaskIndex = index;
       this.selectedMaskIndex = index;
     }
+  }
+
+  // Toggle the per-mask "hide red overlay" flag. Absent key = visible.
+  toggleMaskHidden(index: number): void {
+    const next = new Map(this.maskHidden);
+    next.set(index, !next.get(index));
+    this.maskHidden = next;
   }
 }
 

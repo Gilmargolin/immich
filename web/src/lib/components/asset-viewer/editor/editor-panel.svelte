@@ -16,6 +16,7 @@
     mdiCrop,
     mdiDelete,
     mdiEye,
+    mdiEyeOff,
     mdiFlipHorizontal,
     mdiFlipVertical,
     mdiGradientHorizontal,
@@ -496,6 +497,20 @@
               title="Select for slider editing"
             >
               <span>{maskLabel(mask, i)}</span>
+            </button>
+            <button
+              type="button"
+              class="rounded p-1 hover:bg-gray-700
+                {adjustManager.maskHidden.get(i)
+                ? 'text-gray-500 hover:text-white'
+                : 'text-immich-primary hover:text-immich-primary/80'}"
+              onclick={() => adjustManager.toggleMaskHidden(i)}
+              aria-label={adjustManager.maskHidden.get(i)
+                ? `Show ${maskLabel(mask, i)} overlay`
+                : `Hide ${maskLabel(mask, i)} overlay`}
+              title={adjustManager.maskHidden.get(i) ? 'Show mask overlay' : 'Hide mask overlay'}
+            >
+              <Icon icon={adjustManager.maskHidden.get(i) ? mdiEyeOff : mdiEye} size="14" />
             </button>
             <button
               type="button"

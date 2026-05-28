@@ -965,7 +965,7 @@
      surface) ends up on top in DOM order; the editing overlay has its own
      interactive canvas and accepts paint events. -->
   {#each masks as mask, i (i)}
-    {#if mask.kind === 'brush' && i !== editingIndex && i !== selectedIndex}
+    {#if mask.kind === 'brush' && i !== editingIndex && !adjustManager.maskHidden.get(i)}
       <BrushOverlay maskIndex={i} readonly />
     {/if}
   {/each}
