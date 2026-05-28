@@ -597,6 +597,35 @@
       </div>
     {/if}
 
+    <!-- Smart-Subject Size slider. Shown only when the currently-selected
+         mask was created by the Smart button (we cached its soft sigmoid
+         payload). Drags re-binarize the soft mask client-side instantly —
+         the brush-overlay re-loads the new PNG and the live preview
+         updates. Negative = mask shrinks; positive = mask grows. Per-mask
+         (one slider state per mask index). -->
+    {#if adjustManager.selectedMaskIndex !== null && adjustManager.smartMaskSoft.has(adjustManager.selectedMaskIndex)}
+      <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-3">Size</h2>
+      <div class="flex items-center gap-2 px-1 pb-2 text-[11px] text-gray-400">
+        <span class="w-12 shrink-0 text-end">smaller</span>
+        <input
+          type="range"
+          min="-128"
+          max="128"
+          step="1"
+          value={adjustManager.smartMaskSize.get(adjustManager.selectedMaskIndex) ?? 0}
+          oninput={(e) => {
+            const idx = adjustManager.selectedMaskIndex;
+            if (idx === null) return;
+            void adjustManager.setSmartMaskSize(idx, Number.parseInt((e.target as HTMLInputElement).value, 10));
+          }}
+          class="flex-1 h-1 accent-immich-primary cursor-pointer"
+          aria-label="Smart subject mask size"
+          title="Drag to grow or shrink the AI silhouette"
+        />
+        <span class="w-12 shrink-0">larger</span>
+      </div>
+    {/if}
+
     <!-- Light adjustments -->
     <h2 class="text-xs font-medium text-gray-400 uppercase tracking-wide mb-1 mt-3">
       {$t('adjust_light')}{adjustManager.selectedMaskIndex !== null

@@ -158,37 +158,32 @@ export const decodeMaskWithBox = async (
   enc: EncodedImage,
   bbox: { x0: number; y0: number; x1: number; y1: number },
 ): Promise<DecodedMask> => {
-  // SlimSAM (the distilled / pruned SAM variant we ship) handles point
-  // prompts far more reliably than box prompts in practice — its HF model
-  // card's only example uses a single positive point, and our field testing
-  // with the box-label convention (labels 2 & 3 at the two corners) kept
-  // returning partial or inverted silhouettes on real portraits.
+  // Hybrid SAM prompt: the user's box corners (labels 2 = top-left,
+  // 3 = bottom-right) PLUS a single positive centre point (label 1).
   //
-  // So we convert the user's box → a small grid of positive points covering
-  // the box interior. Five points (centre + 4 quarter-positions) gives SAM
-  // enough signal to lock onto the whole subject when the user drags around
-  // it, while still treating the geometry as a "box selection" from the
-  // user's perspective.
+  // The 5-positive-point grid we tried previously was leaking foreground
+  // hints onto the background when the subject didn't fill the user's box
+  // (a portrait with a door visible on one side had the quarter points
+  // landing on the door → SAM segmented the door too).
+  //
+  // Box corners constrain SAM to look inside the box; the centre point
+  // gives it an unambiguous foreground anchor. This is the standard SAM
+  // "box + point" combined prompt; with SAM-L (vs the SlimSAM we used
+  // before) it works very well on real photos.
   const cx = (bbox.x0 + bbox.x1) / 2;
   const cy = (bbox.y0 + bbox.y1) / 2;
-  const qx0 = bbox.x0 + (bbox.x1 - bbox.x0) * 0.25;
-  const qx1 = bbox.x0 + (bbox.x1 - bbox.x0) * 0.75;
-  const qy0 = bbox.y0 + (bbox.y1 - bbox.y0) * 0.25;
-  const qy1 = bbox.y0 + (bbox.y1 - bbox.y0) * 0.75;
-  const promptPoints: [number, number][] = [
-    [cx, cy],
-    [qx0, qy0],
-    [qx1, qy0],
-    [qx0, qy1],
-    [qx1, qy1],
+  const promptPoints: [number, number, number][] = [
+    [bbox.x0, bbox.y0, 2], // top-left of box
+    [bbox.x1, bbox.y1, 3], // bottom-right of box
+    [cx, cy, 1], // positive centre point — foreground anchor
   ];
   const points = new Float32Array(promptPoints.length * 2);
+  const labels = new BigInt64Array(promptPoints.length);
   for (let i = 0; i < promptPoints.length; i++) {
     points[i * 2] = promptPoints[i][0] * enc.scale;
     points[i * 2 + 1] = promptPoints[i][1] * enc.scale;
+    labels[i] = BigInt(promptPoints[i][2]);
   }
-  // All 5 points are positive (foreground) — label 1 per SAM convention.
-  const labels = new BigInt64Array(promptPoints.length).fill(1n);
 
   const decoder = await getDecoder();
   const out = await decoder.run({

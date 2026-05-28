@@ -117,6 +117,19 @@ export class AdjustManager implements EditToolManager {
   segmentInFlight = $state(false);
   // Latest error from a segment-from-box call, surfaced in the editor panel.
   segmentError = $state<string | null>(null);
+
+  // Smart-Subject masks come from the server as SOFT sigmoid PNGs (anti-
+  // aliased boundary). Cached client-side so the per-mask Size slider can
+  // re-binarize at a different threshold on every drag tick without a
+  // server round-trip. Keyed by mask index; cleared on mask removal.
+  // Transient — only persists for the current editor session.
+  smartMaskSoft = $state(new Map<number, string>());
+  // Per-mask Size shift in [-100, 100]. 0 = SAM's natural boundary;
+  // positive shifts dilate the mask (include more), negative shifts erode
+  // (include less). Implemented as a byte offset applied to the soft mask
+  // before re-encoding, which is equivalent to shifting the binarization
+  // threshold up or down in the soft sigmoid's confidence curve.
+  smartMaskSize = $state(new Map<number, number>());
   private initialValues = $state<AdjustmentValues>({ ...defaultValues });
   private initialMasks = $state<LocalMask[]>([]);
 
@@ -360,7 +373,11 @@ export class AdjustManager implements EditToolManager {
   // grayscale PNG — same format the brush overlay produces — so it round-trips
   // through the existing decode path in media.repository.ts without
   // re-encoding. Returns the new mask's index, or null if at capacity.
-  addSubjectMask(maskDataUrl: string): number | null {
+  //
+  // If `softMaskDataUrl` is provided (Smart-Subject flow), the original
+  // anti-aliased SAM output is cached so the per-mask Size slider can
+  // re-binarize at different thresholds without re-querying the server.
+  addSubjectMask(maskDataUrl: string, softMaskDataUrl?: string): number | null {
     if (this.masks.length >= 8) {
       return null;
     }
@@ -375,7 +392,58 @@ export class AdjustManager implements EditToolManager {
     // Don't enter geometry-edit mode on AI masks — they're already shaped
     // correctly; the user picks the brush button explicitly to refine them.
     this.editingMaskIndex = null;
+    if (softMaskDataUrl) {
+      const softCopy = new Map(this.smartMaskSoft);
+      softCopy.set(idx, softMaskDataUrl);
+      this.smartMaskSoft = softCopy;
+      const sizeCopy = new Map(this.smartMaskSize);
+      sizeCopy.set(idx, 0);
+      this.smartMaskSize = sizeCopy;
+    }
     return idx;
+  }
+
+  // Re-binarize the cached soft mask at a new threshold (encoded as a byte
+  // shift). Called by the Size slider in the editor panel. Positive shift =
+  // include more borderline pixels (mask grows); negative = include fewer
+  // (mask shrinks). Sigmoid mid-confidence pixels are around byte 128, so
+  // a shift of ±64 moves the threshold by 25 % of the dynamic range.
+  async setSmartMaskSize(index: number, shift: number): Promise<void> {
+    const soft = this.smartMaskSoft.get(index);
+    if (!soft || typeof document === 'undefined') {
+      return;
+    }
+    const clampedShift = Math.max(-128, Math.min(128, shift));
+    const sizeCopy = new Map(this.smartMaskSize);
+    sizeCopy.set(index, clampedShift);
+    this.smartMaskSize = sizeCopy;
+
+    const img = new Image();
+    img.src = soft;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = BRUSH_MASK_RESOLUTION;
+    canvas.height = BRUSH_MASK_RESOLUTION;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return;
+    }
+    ctx.drawImage(img, 0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
+    const imgData = ctx.getImageData(0, 0, BRUSH_MASK_RESOLUTION, BRUSH_MASK_RESOLUTION);
+    const data = imgData.data;
+    // The brush-mask PNG is opaque grayscale (R=G=B=value, A=255). Shifting
+    // the grayscale on all three channels keeps the brush-overlay's re-key
+    // happy (it copies R into alpha) and matches the server's
+    // `.greyscale()` decode.
+    for (let i = 0; i < data.length; i += 4) {
+      const v = Math.max(0, Math.min(255, data[i] + clampedShift));
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+    }
+    ctx.putImageData(imgData, 0, 0);
+    const shifted = canvas.toDataURL('image/png');
+    this.masks = this.masks.map((m, i) => (i === index && m.kind === 'brush' ? { ...m, mask: shifted } : m));
   }
 
   // Smart Subject commit: take the user-drawn box (normalized to image W/H,
@@ -412,7 +480,10 @@ export class AdjustManager implements EditToolManager {
         id: assetId,
         assetSegmentFromBoxDto: { x0: nx0, y0: ny0, x1: nx1, y1: ny1 },
       });
-      this.addSubjectMask(res.maskDataUrl);
+      // The server returns a SOFT sigmoid mask — pass it as both the
+      // displayed mask AND the cached soft source so the Size slider
+      // can re-binarize without a server round-trip.
+      this.addSubjectMask(res.maskDataUrl, res.maskDataUrl);
     } catch (error) {
       console.error('Smart subject segmentation failed', error);
       this.segmentError = 'Segmentation failed. Try drawing a different box, or retry.';
@@ -457,6 +528,21 @@ export class AdjustManager implements EditToolManager {
     };
     this.selectedMaskIndex = fixIndex(this.selectedMaskIndex);
     this.editingMaskIndex = fixIndex(this.editingMaskIndex);
+    // Reindex the smart-mask caches: drop the removed entry and shift
+    // everything above it down by one so the Maps stay in sync with the
+    // new array indices.
+    const reindex = <T,>(src: Map<number, T>): Map<number, T> => {
+      const out = new Map<number, T>();
+      for (const [k, v] of src) {
+        if (k === index) {
+          continue;
+        }
+        out.set(k > index ? k - 1 : k, v);
+      }
+      return out;
+    };
+    this.smartMaskSoft = reindex(this.smartMaskSoft);
+    this.smartMaskSize = reindex(this.smartMaskSize);
   }
 
   updateMask(index: number, mask: LocalMask): void {
