@@ -255,6 +255,9 @@ export class AdjustManager implements EditToolManager {
     this.pendingMaskKind = null;
     this.smartMaskSoft = new Map();
     this.smartMaskSize = new Map();
+    // Re-initialised below after the masks are loaded so we can hide every
+    // pre-existing one by default — they weren't freshly created in this
+    // session and would otherwise drown the photo in red overlays on open.
     this.maskHidden = new Map();
     const adjustEdit = edits.find((edit) => edit.action === 'adjust');
     if (adjustEdit) {
@@ -269,6 +272,15 @@ export class AdjustManager implements EditToolManager {
       this.initialValues = { ...defaultValues };
       this.masks = [];
       this.initialMasks = [];
+    }
+    // Default any pre-existing masks to hidden — only freshly-created masks
+    // auto-show.
+    if (this.masks.length > 0) {
+      const hidden = new Map<number, boolean>();
+      for (let i = 0; i < this.masks.length; i++) {
+        hidden.set(i, true);
+      }
+      this.maskHidden = hidden;
     }
   }
 
@@ -290,24 +302,27 @@ export class AdjustManager implements EditToolManager {
   }
 
   setValue(key: keyof AdjustmentValues, value: number) {
+    // Slider drags are "unrelated to inspecting a mask region": hide the red
+    // overlays so the user can see the actual tonal effect on the photo. The
+    // eye icon next to each mask is the explicit show/hide control if they
+    // want a particular mask's outline visible.
+    //
+    // We deliberately do NOT touch editingMaskIndex here (we used to, which
+    // made the pencil button feel broken — slider drags silently exited
+    // edit mode, and clicking the pencil to "exit" actually re-entered).
+    this.hideAllMasks();
     if (this.selectedMaskIndex !== null && this.masks[this.selectedMaskIndex]) {
       const idx = this.selectedMaskIndex;
       this.masks = this.masks.map((m, i) =>
         i === idx ? ({ ...m, params: { ...m.params, [key]: value } } as LocalMask) : m,
       );
-      // Note: we deliberately do NOT auto-clear editingMaskIndex here. The
-      // pencil button is the sole toggle for geometry-edit mode; previously
-      // every slider drag silently exited edit mode, which made the pencil
-      // button feel broken (click to exit → state was already cleared by
-      // your last slider tweak → click did nothing visible). The new eye
-      // icon next to each mask is the dedicated control for hiding the red
-      // overlay independent of edit mode.
       return;
     }
     this.values = { ...this.values, [key]: value };
   }
 
   addLinearMask(): void {
+    this.hideAllMasks();
     this.masks = [...this.masks, defaultLinearMask()];
     const idx = this.masks.length - 1;
     this.selectedMaskIndex = idx;
@@ -315,6 +330,7 @@ export class AdjustManager implements EditToolManager {
   }
 
   addRadialMask(): void {
+    this.hideAllMasks();
     this.masks = [...this.masks, defaultRadialMask()];
     const idx = this.masks.length - 1;
     this.selectedMaskIndex = idx;
@@ -342,6 +358,7 @@ export class AdjustManager implements EditToolManager {
     if (this.pendingMaskKind !== 'linear') {
       return;
     }
+    this.hideAllMasks();
     const mask: LocalMask = {
       kind: 'linear',
       ax,
@@ -368,6 +385,7 @@ export class AdjustManager implements EditToolManager {
     if (this.pendingMaskKind !== 'brush') {
       return;
     }
+    this.hideAllMasks();
     const mask: LocalMask = {
       kind: 'brush',
       mask: maskBase64,
@@ -393,6 +411,7 @@ export class AdjustManager implements EditToolManager {
     if (this.masks.length >= 8) {
       return null;
     }
+    this.hideAllMasks();
     const mask: LocalMask = {
       kind: 'brush',
       mask: maskDataUrl,
@@ -511,6 +530,7 @@ export class AdjustManager implements EditToolManager {
     if (this.pendingMaskKind !== 'radial') {
       return;
     }
+    this.hideAllMasks();
     const mask: LocalMask = {
       kind: 'radial',
       cx,
@@ -666,6 +686,19 @@ export class AdjustManager implements EditToolManager {
   toggleMaskHidden(index: number): void {
     const next = new Map(this.maskHidden);
     next.set(index, !next.get(index));
+    this.maskHidden = next;
+  }
+
+  // Hide every mask's red overlay. Called automatically whenever the user
+  // does something unrelated to inspecting a mask region: adjusting any
+  // slider, entering crop, rotating, etc. The user's manual eye toggle can
+  // bring any mask back; the auto-hide is just a clean default so the photo
+  // isn't drowned in red tints while doing global edits.
+  hideAllMasks(): void {
+    const next = new Map(this.maskHidden);
+    for (let i = 0; i < this.masks.length; i++) {
+      next.set(i, true);
+    }
     this.maskHidden = next;
   }
 }

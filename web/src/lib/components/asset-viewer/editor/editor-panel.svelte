@@ -195,6 +195,10 @@
 
   function enterCropMode() {
     editManager.isCropMode = true;
+    // Crop is "unrelated to inspecting a mask region" — hide all overlays so
+    // the photo isn't tinted red while the user is framing the crop. The eye
+    // icon next to each mask still brings them back if needed.
+    adjustManager.hideAllMasks();
   }
 
   function exitCropMode() {
